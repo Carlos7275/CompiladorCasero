@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Paso"};
+const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter","Booleano", "Paso", "Verdadero", "Falso"};
 
 void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
@@ -28,14 +28,11 @@ void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
     }
     lexema[i] = '\0';
 
-    if (EsPalabraReservada(lexema))
-    {
-        generarToken(PalRes, lexema, OTRO, Col, Renglon);
-    }
-    else
-    {
-        generarToken(ID, lexema, OTRO, Col, Renglon);
-    }
+    enum TipoToken token_type = ID; 
+    enum TipoDato data_type = OTRO; 
+
+    data_type = EsPalabraReservadaConTipo(lexema,&token_type);
+    generarToken(token_type, lexema, data_type, Col, Renglon);
 }
 
 void EsCadena(FILE *archivo, char car, int Col, int Renglon)
@@ -136,23 +133,38 @@ void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
     generarToken(2, lexema, tipoDato, Col, Renglon);
 }
 
-int EsPalabraReservada(const char *lexema)
+enum TipoDato EsPalabraReservadaConTipo(const char *lexema, enum TipoToken *out_tipo_token)
 {
     const int longitud = sizeof(palabReserv) / sizeof(palabReserv[0]);
-
     for (int i = 0; i < longitud; i++)
     {
         if (strcmp(lexema, palabReserv[i]) == 0)
         {
-            return 1;
+            *out_tipo_token = PalRes;
+
+            if (strcmp(lexema, "Entero") == 0)
+                return INT;
+            if (strcmp(lexema, "Cadena") == 0)
+                return STRING;
+            if (strcmp(lexema, "Caracter") == 0)
+                return CHAR;
+            if (strcmp(lexema, "Flotante") == 0)
+                return FLOAT;
+            if (strcmp(lexema, "Verdadero") == 0 || strcmp(lexema, "Falso") == 0)
+            {
+
+                return BOOL;
+            }
+
+            return TIPO_VOID;
         }
     }
-    return 0;
+    return OTRO;
 }
 
 void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
-     char lexema[100]; // Usamos un array más grande por si es un símbolo doble
+    char lexema[100]; // Usamos un array más grande por si es un símbolo doble
     int i = 0;
     lexema[i++] = car_inicial; // El primer carácter ya se añade al lexema
 
@@ -167,12 +179,12 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '+'; // Si es otro '+', lo añade al lexema
             lexema[i] = '\0';
             generarToken(UNARIO, lexema, OTRO, Col, Renglon); // Es '++'
-            Col++; // Consumimos un carácter adicional, avanzamos la columna global
+            Col++;                                            // Consumimos un carácter adicional, avanzamos la columna global
         }
         else
         {
-            ungetc(next_char_val, archivo); // Si no es '+', lo devuelve al stream
-            lexema[i] = '\0'; // Es solo '+'
+            ungetc(next_char_val, archivo);                 // Si no es '+', lo devuelve al stream
+            lexema[i] = '\0';                               // Es solo '+'
             generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operador Aritmético simple
         }
         break;
@@ -184,19 +196,19 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '-'; // Si es otro '-', lo añade al lexema
             lexema[i] = '\0';
             generarToken(OPAR, lexema, OTRO, Col, Renglon); // Es '--'
-            Col++; // Consumimos un carácter adicional, avanzamos la columna global
+            Col++;                                          // Consumimos un carácter adicional, avanzamos la columna global
         }
         else
         {
-            ungetc(next_char_val, archivo); // Si no es '-', lo devuelve al stream
-            lexema[i] = '\0'; // Es solo '-'
+            ungetc(next_char_val, archivo);                 // Si no es '-', lo devuelve al stream
+            lexema[i] = '\0';                               // Es solo '-'
             generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operador Aritmético simple
         }
         break;
 
     case '*':
     case '/':
-        lexema[i] = '\0'; // Aseguramos que sea nulo-terminado después del único carácter
+        lexema[i] = '\0';                               // Aseguramos que sea nulo-terminado después del único carácter
         generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operadores Aritméticos simples
         break;
 
@@ -207,12 +219,12 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '='; // Si es otro '=', lo añadimos
             lexema[i] = '\0';
             generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '=='
-            Col++; // Consumimos un carácter adicional
+            Col++;                                            // Consumimos un carácter adicional
         }
         else
         {
-            ungetc(next_char_val, archivo); // Si no es '=', lo devolvemos
-            lexema[i] = '\0';              // Es solo '='
+            ungetc(next_char_val, archivo);                    // Si no es '=', lo devolvemos
+            lexema[i] = '\0';                                  // Es solo '='
             generarToken(OPASIGN, lexema, OTRO, Col, Renglon); // Operador de Asignación
         }
         break;
@@ -224,7 +236,7 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '=';
             lexema[i] = '\0';
             generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '!='
-            Col++; // Consumimos un carácter adicional
+            Col++;                                            // Consumimos un carácter adicional
         }
         else
         {
@@ -241,7 +253,7 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '=';
             lexema[i] = '\0';
             generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '<='
-            Col++; // Consumimos un carácter adicional
+            Col++;                                            // Consumimos un carácter adicional
         }
         else
         {
@@ -258,7 +270,7 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '=';
             lexema[i] = '\0';
             generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '>='
-            Col++; // Consumimos un carácter adicional
+            Col++;                                            // Consumimos un carácter adicional
         }
         else
         {
@@ -275,7 +287,7 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '&';
             lexema[i] = '\0';
             generarToken(OPLOG, lexema, OTRO, Col, Renglon); // Es '&&'
-            Col++; // Consumimos un carácter adicional
+            Col++;                                           // Consumimos un carácter adicional
         }
         else
         {
@@ -292,7 +304,7 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[i++] = '|';
             lexema[i] = '\0';
             generarToken(OPLOG, lexema, OTRO, Col, Renglon); // Es '||'
-            Col++; // Consumimos un carácter adicional
+            Col++;                                           // Consumimos un carácter adicional
         }
         else
         {
@@ -309,9 +321,9 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
     case '(':
     case ')':
     case ';':
-    case ':': // El caracter ':' se maneja aquí como símbolo especial
-    case ',': // La coma también es un símbolo especial
-        lexema[i] = '\0'; // Aseguramos nulo-terminación
+    case ':':                                               // El caracter ':' se maneja aquí como símbolo especial
+    case ',':                                               // La coma también es un símbolo especial
+        lexema[i] = '\0';                                   // Aseguramos nulo-terminación
         generarToken(ESPECIAL, lexema, OTRO, Col, Renglon); // Símbolos Especiales
         break;
 
@@ -321,9 +333,8 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
         break;
 
     default:
-        lexema[i] = '\0'; // Aseguramos nulo-terminación
+        lexema[i] = '\0';                                      // Aseguramos nulo-terminación
         generarToken(DESCONOCIDO, lexema, OTRO, Col, Renglon); // Carácter desconocido
         break;
     }
-
 }

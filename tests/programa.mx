@@ -1,7 +1,9 @@
 // Este es un comentario. Asegúrate de que tu lexer pueda ignorar los comentarios de línea simple (//).
 
 // Declaraciones y asignaciones de variables
-Entero valorNumerico = 10;
+Entero valorNumerico = 15;
+
+Booleano valor = Verdadero;
 Cadena mensajeBienvenida = "Bienvenido al mundo de ";
 Cadena nombreLenguaje = "mi lenguaje!";
 Flotante precioUnitario = 15.75; // Asumiendo que 'Flotante' es un tipo de dato válido

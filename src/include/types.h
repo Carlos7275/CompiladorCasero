@@ -24,6 +24,9 @@ enum TipoDato
     STRING, // 1
     CHAR,   // 2
     FLOAT,  // 3
+    BOOL,
+    TIPO_VOID,
+    TIPO_ERROR,
     OTRO    // 4
 };
 
