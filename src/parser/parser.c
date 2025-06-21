@@ -12,11 +12,6 @@ struct nodo *token_actual_parser;
 void iniciarParser()
 {
     token_actual_parser = raiz;
-    if (token_actual_parser != NULL)
-    {
-        token_actual_parser->info.Renglon, token_actual_parser->info.Columna,
-            token_actual_parser->info.Lexema, token_actual_parser->info.TipoToken;
-    }
 }
 
 struct Token *peekToken()
@@ -74,11 +69,13 @@ void match(enum TipoToken tipo_esperado, const char *lexema_esperado)
 ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
 {
     ASTNode *newNode = (ASTNode *)malloc(sizeof(ASTNode));
+
     if (newNode == NULL)
     {
         perror("Error de asignación de memoria para nodo AST");
         exit(EXIT_FAILURE);
     }
+
     newNode->type = type;
     newNode->renglon = renglon;
     newNode->columna = columna;
@@ -91,8 +88,9 @@ ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
     newNode->valor.valor_numero = 0.0;
     newNode->valor.valor_cadena = NULL;
     newNode->valor.valor_booleano = 0;
-
+    newNode->tipoconstante = -1;
     newNode->declared_type_info = -1;
+    newNode->ir_result_name = NULL;
 
     return newNode;
 }
@@ -137,10 +135,7 @@ ASTNode *parseListaSentencias()
         struct Token *current_token = peekToken();
 
         if (current_token->TipoToken == PalRes &&
-            (strcmp(current_token->Lexema, "FinSi") == 0 ||
-             strcmp(current_token->Lexema, "Sino") == 0 ||
-             strcmp(current_token->Lexema, "FinMientras") == 0 ||
-             strcmp(current_token->Lexema, "FinPara") == 0))
+            strcmp(current_token->Lexema, "Sino") == 0)
         {
             break;
         }
@@ -195,6 +190,23 @@ ASTNode *parseSentenciaODeclaracion()
         else if (strcmp(token_inicio_sentencia->Lexema, "Mostrar") == 0)
         {
             node = parseMostrarStmt();
+            match(ESPECIAL, ";");
+        }
+        else if (strcmp(token_inicio_sentencia->Lexema, "Constante") == 0)
+        {
+            node = parseDeclaracionConstante();
+            match(ESPECIAL, ";");
+        }
+        else if (strcmp(token_inicio_sentencia->Lexema, "Continuar") == 0)
+        {
+            struct Token *continuar_token = consumirToken();
+            node = crearNodoAST(AST_CONTINUAR_STMT, continuar_token->Renglon, continuar_token->Columna);
+            match(ESPECIAL, ";");
+        }
+        else if (strcmp(token_inicio_sentencia->Lexema, "Romper") == 0)
+        {
+            struct Token *romper_token = consumirToken();
+            node = crearNodoAST(AST_ROMPER_STMT, romper_token->Renglon, romper_token->Columna);
             match(ESPECIAL, ";");
         }
         else if (strcmp(token_inicio_sentencia->Lexema, "Leer") == 0)
@@ -299,6 +311,84 @@ ASTNode *parseDeclaracion()
     return declaracion_node;
 }
 
+ASTNode *parseDeclaracionConstante()
+{
+    struct Token *const_token = consumirToken();
+    int renglon = const_token->Renglon;
+    int columna = const_token->Columna;
+
+    struct Token *tipo_token_consumido = consumirToken();
+    if (tipo_token_consumido == NULL || tipo_token_consumido->TipoToken != PalRes ||
+        (strcmp(tipo_token_consumido->Lexema, "Entero") != 0 &&
+         strcmp(tipo_token_consumido->Lexema, "Cadena") != 0 &&
+         strcmp(tipo_token_consumido->Lexema, "Flotante") != 0 &&
+         strcmp(tipo_token_consumido->Lexema, "Caracter") != 0 &&
+         strcmp(tipo_token_consumido->Lexema, "Booleano") != 0))
+    {
+        fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba un tipo de dato (Entero, Cadena, etc.) después de 'Constante'.\n",
+                tipo_token_consumido ? tipo_token_consumido->Renglon : renglon, tipo_token_consumido ? tipo_token_consumido->Columna : columna);
+        exit(EXIT_FAILURE);
+    }
+
+    struct Token *id_token = peekToken();
+    if (id_token == NULL || id_token->TipoToken != ID)
+    {
+        fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba un identificador para la constante.\n",
+                id_token ? id_token->Renglon : renglon, id_token ? id_token->Columna : columna);
+        exit(EXIT_FAILURE);
+    }
+    match(ID, NULL);
+
+    ASTNode *id_node = crearNodoAST(AST_IDENTIFICADOR, id_token->Renglon, id_token->Columna);
+    id_node->valor.nombre_id = strdup(id_token->Lexema);
+    id_node->tipoconstante = CONSTANTE_SIMBOLICA;
+
+    ASTNode *expr_node = NULL;
+
+    if (peekToken()->TipoToken == OPASIGN)
+    {
+        consumirToken();
+        expr_node = parseExpresion();
+        if (expr_node == NULL)
+        {
+            fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba una expresión de inicialización para la constante después de '='.\n",
+                    peekToken() ? peekToken()->Renglon : renglon, peekToken() ? peekToken()->Columna : columna);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    ASTNode *const_decl_node = crearNodoAST(AST_DECLARACION_CONST, renglon, columna);
+    const_decl_node->hijo_izq = id_node;
+    const_decl_node->hijo_der = expr_node;
+
+    if (strcmp(tipo_token_consumido->Lexema, "Entero") == 0)
+    {
+        const_decl_node->declared_type_info = INT;
+    }
+    else if (strcmp(tipo_token_consumido->Lexema, "Cadena") == 0)
+    {
+        const_decl_node->declared_type_info = STRING;
+    }
+    else if (strcmp(tipo_token_consumido->Lexema, "Flotante") == 0)
+    {
+        const_decl_node->declared_type_info = FLOAT;
+    }
+    else if (strcmp(tipo_token_consumido->Lexema, "Caracter") == 0)
+    {
+        const_decl_node->declared_type_info = CHAR;
+    }
+    else if (strcmp(tipo_token_consumido->Lexema, "Booleano") == 0)
+    {
+        const_decl_node->declared_type_info = BOOL;
+    }
+    else
+    {
+        fprintf(stderr, "Error interno: Tipo de dato '%s' no reconocido en declaración de constante.\n", tipo_token_consumido->Lexema);
+        const_decl_node->declared_type_info = DESCONOCIDO;
+    }
+
+    return const_decl_node;
+}
 ASTNode *parseAsignacion()
 {
     struct Token *id_token = peekToken();
@@ -550,7 +640,7 @@ ASTNode *parseExpresionComparacion()
     ASTNode *left_expr = parseExpresionAritmetica();
 
     struct Token *op_token = peekToken();
-    if (op_token != NULL && op_token->TipoToken == 5)
+    if (op_token != NULL && op_token->TipoToken == OPCOMP)
     {
         enum ASTNodeType comparison_type = -1;
 
@@ -603,7 +693,7 @@ ASTNode *parseExpresionAritmetica()
     ASTNode *expr_node = parseTermino();
 
     struct Token *op_token = peekToken();
-    while (op_token != NULL && op_token->TipoToken == 4 &&
+    while (op_token != NULL && op_token->TipoToken == OPAR &&
            (strcmp(op_token->Lexema, "+") == 0 || strcmp(op_token->Lexema, "-") == 0))
     {
 
@@ -624,7 +714,7 @@ ASTNode *parseExpresionAritmetica()
         if (new_expr_node->hijo_der == NULL)
         {
             fprintf(stderr, "Error de sintaxis (R%d, C%d): Se esperaba una expresión después de '%s'.\n",
-                    op_token->Renglon, op_token->Columna, op_token->TipoToken);
+                    op_token->Renglon, op_token->Columna, op_token->Lexema);
             exit(EXIT_FAILURE);
         }
 
@@ -640,7 +730,8 @@ ASTNode *parseTermino()
 
     struct Token *op_token = peekToken();
     while (op_token != NULL && op_token->TipoToken == 4 &&
-           (strcmp(op_token->Lexema, "*") == 0 || strcmp(op_token->Lexema, "/") == 0))
+           (strcmp(op_token->Lexema, "*") == 0 || strcmp(op_token->Lexema, "/") == 0 ||
+            strcmp(op_token->Lexema, "%") == 0))
     {
 
         consumirToken();
@@ -650,9 +741,13 @@ ASTNode *parseTermino()
         {
             new_term_node = crearNodoAST(AST_MULT_EXPR, op_token->Renglon, op_token->Columna);
         }
-        else
+        else if (strcmp(op_token->Lexema, "/") == 0)
         {
             new_term_node = crearNodoAST(AST_DIV_EXPR, op_token->Renglon, op_token->Columna);
+        }
+        else
+        {
+            new_term_node = crearNodoAST(AST_MOD_EXPR, op_token->Renglon, op_token->Columna);
         }
 
         new_term_node->hijo_izq = term_node;
@@ -660,7 +755,7 @@ ASTNode *parseTermino()
         if (new_term_node->hijo_der == NULL)
         {
             fprintf(stderr, "Error de sintaxis (R%d, C%d): Se esperaba una expresión después de '%s'.\n",
-                    op_token->Renglon, op_token->Columna, op_token->TipoToken);
+                    op_token->Renglon, op_token->Columna, op_token->Lexema);
             exit(EXIT_FAILURE);
         }
 
@@ -742,30 +837,31 @@ ASTNode *parseFactor()
         }
         break;
     case PalRes:
-        if (current_token->tipoDato == BOOL) // ¡CORREGIDO!
+        if (current_token->tipoDato == BOOL)
         {
             node = crearNodoAST(AST_LITERAL_BOOLEANO, current_token->Renglon, current_token->Columna);
-            // Opcional: almacenar el valor booleano (true/false) en el nodo si lo necesitas en fases posteriores
-             if (strcmp(current_token->Lexema, "Verdadero") == 0) {
-                node->valor.valor_booleano = 1; // Asumiendo que 1 es verdadero, 0 falso
-             } else {
-                 node->valor.valor_booleano = 0;
-             }
-            node->resolved_type = BOOL; // Asigna el tipo semántico
-            
-            
-            consumirToken();            // Consume el token "Verdadero" o "Falso"
-            break;                      // Salimos del switch
+            if (strcmp(current_token->Lexema, "Verdadero") == 0)
+            {
+                node->valor.valor_booleano = 1;
+            }
+            else
+            {
+                node->valor.valor_booleano = 0;
+            }
+            node->resolved_type = BOOL;
+
+            consumirToken();
+            break;
             ;
         }
         else
         {
-            // Si es una palabra reservada que no es un booleano literal
+
             fprintf(stderr, "Error de sintaxis en (R%d, C%d): Palabra reservada inesperada en el factor: '%s'.\n",
                     current_token->Renglon, current_token->Columna, current_token->Lexema);
             exit(EXIT_FAILURE);
         }
-        // No hay un 'break' aquí si hay un 'else', se necesita si el 'if' no se cumple.
+
         break;
 
     default:
@@ -919,11 +1015,10 @@ ASTNode *parseSentenciaBuclePara()
     int renglon = para_token->Renglon;
     int columna = para_token->Columna;
 
-    ASTNode *for_node = crearNodoAST(AST_PARA_STMT, renglon, columna); // Crea el nodo principal del bucle FOR
+    ASTNode *for_node = crearNodoAST(AST_PARA_STMT, renglon, columna);
 
     match(ESPECIAL, "(");
 
-    // --- 1. Inicialización ---
     ASTNode *init_stmt = NULL;
     struct Token *peek_init = peekToken();
     if (peek_init != NULL && !(peek_init->TipoToken == ESPECIAL && strcmp(peek_init->Lexema, ";") == 0))
@@ -931,7 +1026,8 @@ ASTNode *parseSentenciaBuclePara()
         if (peek_init->TipoToken == PalRes && (strcmp(peek_init->Lexema, "Entero") == 0 ||
                                                strcmp(peek_init->Lexema, "Flotante") == 0 ||
                                                strcmp(peek_init->Lexema, "Cadena") == 0 ||
-                                               strcmp(peek_init->Lexema, "Caracter") == 0))
+                                               strcmp(peek_init->Lexema, "Caracter") == 0 ||
+                                               strcmp(peek_init->Lexema, "Booleano") == 0))
         {
             init_stmt = parseDeclaracion();
         }
@@ -946,38 +1042,61 @@ ASTNode *parseSentenciaBuclePara()
             exit(EXIT_FAILURE);
         }
     }
-    match(ESPECIAL, ";"); // Consumir el ';' después de la inicialización
+    match(ESPECIAL, ";");
 
-    // --- 2. Condición ---
     ASTNode *condition_expr = NULL;
     struct Token *peek_cond = peekToken();
     if (peek_cond != NULL && !(peek_cond->TipoToken == ESPECIAL && strcmp(peek_cond->Lexema, ";") == 0))
     {
         condition_expr = parseExpresion();
     }
-    match(ESPECIAL, ";"); // Consumir el ';' después de la condición
+    match(ESPECIAL, ";");
 
-    // --- 3. Incremento/Decremento ---
     ASTNode *increment_stmt = NULL;
     struct Token *peek_inc = peekToken();
     if (peek_inc != NULL && !(peek_inc->TipoToken == ESPECIAL && strcmp(peek_inc->Lexema, ")") == 0))
     {
-        if (peek_inc->TipoToken == ID)
+        increment_stmt = parseUpdateStatement();
+    }
+
+    match(ESPECIAL, ")");
+
+    ASTNode *for_params_node = crearNodoAST(AST_PARA_PARAMS, renglon, columna);
+
+    ASTNode *current_param_link = NULL;
+
+    if (init_stmt != NULL)
+    {
+        for_params_node->hijo_izq = init_stmt;
+        current_param_link = init_stmt;
+    }
+
+    if (condition_expr != NULL)
+    {
+        if (current_param_link != NULL)
         {
-            increment_stmt = parseUpdateStatement();
+            current_param_link->siguiente_hermano = condition_expr;
         }
         else
         {
-            fprintf(stderr, "Error de sintaxis (R%d, C%d): Se esperaba una asignación o expresión de incremento/decremento en 'Para'.\n",
-                    peek_inc->Renglon, peek_inc->Columna);
-            exit(EXIT_FAILURE);
+            for_params_node->hijo_izq = condition_expr;
+        }
+        current_param_link = condition_expr;
+    }
+
+    if (increment_stmt != NULL)
+    {
+        if (current_param_link != NULL)
+        {
+            current_param_link->siguiente_hermano = increment_stmt;
+        }
+        else
+        {
+            for_params_node->hijo_izq = increment_stmt;
         }
     }
 
-    match(ESPECIAL, ")"); // Consumir el ')' final del encabezado del for
-    match(ESPECIAL, "{"); // Consumir el '{' de inicio del bloque
-
-    // --- 4. Cuerpo del Bucle ---
+    match(ESPECIAL, "{");
     ASTNode *loop_block = parseBloqueSentencias();
     if (loop_block == NULL)
     {
@@ -985,62 +1104,10 @@ ASTNode *parseSentenciaBuclePara()
                 peekToken() ? peekToken()->Renglon : renglon, peekToken() ? peekToken()->Columna : columna);
         exit(EXIT_FAILURE);
     }
-    match(ESPECIAL, "}"); // Consumir el '}' de cierre del bloque
+    match(ESPECIAL, "}");
 
-    // --- ENLACE DE LOS NODOS EN EL AST_PARA_STMT ---
-    // El nodo AST_PARA_STMT tendrá 3 hijos lógicos: init, condition, increment, body
-    // Usaremos hijo_izq, hijo_der y luego siguiente_hermano para encadenar:
-
-    for_node->hijo_izq = init_stmt; // init_stmt es el primer hijo
-
-    // Creamos un nodo dummy (o reusamos uno) para la cadena de hermanos si es necesario,
-    // o simplemente enlazamos la condición y el incremento directamente.
-
-    if (init_stmt != NULL)
-    {
-        init_stmt->siguiente_hermano = condition_expr; // init -> condition
-    }
-    else
-    {
-        // Si no hay inicialización, la condición es el primer elemento "lógico"
-        for_node->hijo_izq = condition_expr;
-    }
-
-    if (condition_expr != NULL)
-    {
-        condition_expr->siguiente_hermano = increment_stmt; // condition -> increment
-    }
-    else if (init_stmt != NULL)
-    {
-        // Si no hay condición pero hay inicialización, el incremento sigue a la inicialización
-        init_stmt->siguiente_hermano = increment_stmt;
-    }
-    else
-    {
-        // Si no hay init ni condition, el incremento es el primer elemento "lógico"
-        for_node->hijo_izq = increment_stmt;
-    }
-
-    if (increment_stmt != NULL)
-    {
-        increment_stmt->siguiente_hermano = loop_block; // increment -> body
-    }
-    else if (condition_expr != NULL)
-    {
-        // Si no hay incremento pero hay condición, el body sigue a la condición
-        condition_expr->siguiente_hermano = loop_block;
-    }
-    else if (init_stmt != NULL)
-    {
-        // Si no hay incremento ni condición pero hay inicialización, el body sigue a la inicialización
-        init_stmt->siguiente_hermano = loop_block;
-    }
-    else
-    {
-        // Si no hay init, condition o increment, el body es el único "hijo"
-        for_node->hijo_izq = loop_block;
-    }
-    // Asegúrate de que tu función de visita del AST sepa cómo recorrer estos hermanos del for_node->hijo_izq
+    for_node->hijo_izq = for_params_node;
+    for_node->hijo_der = loop_block;
 
     return for_node;
 }
@@ -1048,6 +1115,7 @@ const char *ASTNodeTypeNames[] = {
     "AST_PROGRAMA",
     "AST_LISTA_SENTENCIAS",
     "AST_DECLARACION_VAR",
+    "AST_DECLARACION_CONSTANTE",
     "AST_ASIGNACION_STMT",
     "AST_MOSTRAR_STMT",
     "AST_LEER_STMT",
@@ -1057,6 +1125,8 @@ const char *ASTNodeTypeNames[] = {
     "AST_MIENTRAS_STMT",
     "AST_PARA_STMT",
     "AST_FOR_PARAMS",
+    "AST_CONTINUAR_STMT",
+    "AST_ROMPER_STMT",
     "AST_OR_EXPR",
     "AST_AND_EXPR",
     "AST_NOT_EXPR",
@@ -1070,6 +1140,7 @@ const char *ASTNodeTypeNames[] = {
     "AST_RESTA_EXPR",
     "AST_MULT_EXPR",
     "AST_DIV_EXPR",
+    "AST_MOD_EXPR",
     "AST_NEGACION_UNARIA_EXPR",
     "AST_IDENTIFICADOR",
     "AST_LITERAL_ENTERO",
@@ -1099,6 +1170,7 @@ void ImprimirAST(ASTNode *node, int indent_level)
 
     switch (node->type)
     {
+    case AST_DECLARACION_CONST:
     case AST_DECLARACION_VAR:
         if (node->declared_type_info >= 0 && node->declared_type_info < sizeof(DataTypeNames) / sizeof(DataTypeNames[0]))
         {
@@ -1109,6 +1181,7 @@ void ImprimirAST(ASTNode *node, int indent_level)
             printf(" (Tipo de dato desconocido: %d)", node->declared_type_info);
         }
         break;
+
     case AST_IDENTIFICADOR:
         printf(" (ID: %s)", node->valor.nombre_id);
         break;
@@ -1122,7 +1195,7 @@ void ImprimirAST(ASTNode *node, int indent_level)
         printf(" (Cadena: \"%s\")", node->valor.valor_cadena);
         break;
 
-     case AST_LITERAL_BOOLEANO:
+    case AST_LITERAL_BOOLEANO:
         printf(" (Cadena: \"%d\")", node->valor.valor_booleano);
         break;
     default:

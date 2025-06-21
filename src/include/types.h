@@ -3,18 +3,20 @@
 
 enum TipoToken
 {
-    PalRes,     // 0
-    ID,         // 1
-    NUM,        // 2
-    SIM,        // 3
-    OPAR,       // 4
-    OPCOMP,     // 5
-    OPASIGN,    // 6
-    OPLOG,      // 7
-    ESPECIAL,   // 8
+    PalRes,   // 0
+    ID,       // 1
+    NUM,      // 2
+    SIM,      // 3
+    OPAR,     // 4
+    OPCOMP,   // 5
+    OPASIGN,  // 6
+    OPLOG,    // 7
+    ESPECIAL, // 8
     UNARIO,
-    CAD,        // 9
-    SEPARADOR,  //10
+    CAD,       // 9
+    SEPARADOR, // 10
+    T_ROMPER,
+    T_CONTINUAR,
     DESCONOCIDO // 11
 };
 
@@ -27,7 +29,7 @@ enum TipoDato
     BOOL,
     TIPO_VOID,
     TIPO_ERROR,
-    OTRO    // 4
+    OTRO // 4
 };
 
 struct Token
@@ -57,8 +59,6 @@ struct ErrorSemantico
     int columna;
     struct ErrorSemantico *sig;
 };
-
-
 
 void Insertar(struct Token token);
 void generarToken(int tipoToken, const char *lexema, int tipoDato, int Col, int Renglon);

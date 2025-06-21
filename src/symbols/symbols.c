@@ -2,142 +2,178 @@
 #include <stdlib.h>
 #include <string.h>
 #include "symbols.h"
+#include "types.h"
 #include "semantic.h"
-static int siguiente_id_ambito = 0;
-
 
 
 unsigned int calcular_hash(const char *nombre) {
-    unsigned int valor_hash = 5381;
-    int c;
-
-    while ((c = *nombre++)) {
-        valor_hash = ((valor_hash << 5) + valor_hash) + c;
+    unsigned int hash = 0;
+    for (int i = 0; nombre[i] != '\0'; i++) {
+        hash = hash * 31 + nombre[i];
     }
-    return valor_hash % CUBETAS_TABLA_SIMBOLOS;
+    return hash % CUBETAS_TABLA_SIMBOLOS;
 }
 
 TablaSimbolos *crear_tabla_simbolos(TablaSimbolos *padre) {
     TablaSimbolos *nueva_tabla = (TablaSimbolos *)malloc(sizeof(TablaSimbolos));
     if (nueva_tabla == NULL) {
-        perror("Error al asignar memoria para la tabla de simbolos");
+        perror("Error al asignar memoria para TablaSimbolos");
         exit(EXIT_FAILURE);
     }
 
-    // Ya que 'cubetas' es un arreglo estático dentro de TablaSimbolos,
-    // solo necesitas inicializar sus elementos a NULL.
-    // NO asignes memoria adicional con malloc/calloc para nueva_tabla->cubetas
+    static int next_id = 0;
+    nueva_tabla->id_ambito = next_id++;
+    nueva_tabla->padre = padre;
+
     for (int i = 0; i < CUBETAS_TABLA_SIMBOLOS; i++) {
         nueva_tabla->cubetas[i] = NULL;
     }
 
-    nueva_tabla->padre = padre;
-    nueva_tabla->id_ambito = siguiente_id_ambito++;
+    nueva_tabla->hijos = NULL;
+    nueva_tabla->num_hijos = 0;
+    nueva_tabla->capacidad_hijos = 0;
+
+    if (padre != NULL) {
+        if (padre->num_hijos == padre->capacidad_hijos) {
+            padre->capacidad_hijos = (padre->capacidad_hijos == 0) ? 2 : padre->capacidad_hijos * 2;
+            padre->hijos = (TablaSimbolos **)realloc(padre->hijos, sizeof(TablaSimbolos *) * padre->capacidad_hijos);
+            if (padre->hijos == NULL) {
+                perror("Error al reasignar memoria para hijos de TablaSimbolos");
+                exit(EXIT_FAILURE);
+            }
+        }
+        padre->hijos[padre->num_hijos++] = nueva_tabla;
+    }
 
     return nueva_tabla;
 }
 
 
-void destruir_tabla_simbolos(TablaSimbolos *tabla) {
-    if (tabla == NULL) return;
-
-    for (int i = 0; i < CUBETAS_TABLA_SIMBOLOS; i++) {
-        EntradaSimbolo *entrada = tabla->cubetas[i];
-        while (entrada != NULL) {
-            EntradaSimbolo *temp = entrada;
-            entrada = entrada->siguiente_en_cubeta;
-            free(temp->nombre);
-            free(temp);
-        }
+void destruir_jerarquia_tablas_simbolos(TablaSimbolos *tabla) {
+    if (tabla == NULL) {
+        return;
     }
 
+    for (int i = 0; i < tabla->num_hijos; i++) {
+        destruir_jerarquia_tablas_simbolos(tabla->hijos[i]);
+    }
+
+    if (tabla->hijos != NULL) {
+        free(tabla->hijos);
+        tabla->hijos = NULL;
+    }
+
+    for (int i = 0; i < CUBETAS_TABLA_SIMBOLOS; i++) {
+        EntradaSimbolo *actual = tabla->cubetas[i];
+        while (actual != NULL) {
+            EntradaSimbolo *temp = actual;
+            actual = actual->siguiente_en_cubeta;
+            free(temp->nombre);
+            if (temp->es_constante && temp->tipo == STRING && temp->valor_constante.valor_cadena != NULL) {
+                free(temp->valor_constante.valor_cadena);
+            }
+            free(temp);
+        }
+        tabla->cubetas[i] = NULL;
+    }
     free(tabla);
 }
 
 EntradaSimbolo *agregar_simbolo(TablaSimbolos *tabla, const char *nombre, enum TipoDato tipo, int renglon, int columna) {
-
     if (tabla == NULL || nombre == NULL) {
         return NULL;
     }
 
-    unsigned int indice = calcular_hash(nombre);
-   
-    // Verificar si el símbolo ya existe en el ámbito actual
     if (buscar_simbolo_en_ambito_actual(tabla, nombre) != NULL) {
-        reportar_error_semantico(renglon, columna, "Símbolo '%s' ya declarado en este ámbito.", nombre);
         return NULL;
     }
 
-    // Crear nueva entrada de símbolo
+    unsigned int indice = calcular_hash(nombre);
     EntradaSimbolo *nueva_entrada = (EntradaSimbolo *)malloc(sizeof(EntradaSimbolo));
     if (nueva_entrada == NULL) {
         perror("Error al asignar memoria para EntradaSimbolo");
-        exit(EXIT_FAILURE); // O retorna NULL si prefieres manejarlo sin salir
+        exit(EXIT_FAILURE);
     }
 
-    nueva_entrada->nombre = strdup(nombre); // Duplicar el nombre
-    if (nueva_entrada->nombre == NULL) {
-        perror("Error al duplicar el nombre del simbolo");
-        free(nueva_entrada);
-        exit(EXIT_FAILURE); // O retorna NULL
-    }
+    nueva_entrada->nombre = strdup(nombre);
     nueva_entrada->tipo = tipo;
-
-    // Insertar al principio de la lista enlazada en la cubeta
+    nueva_entrada->es_constante = 0;
+    nueva_entrada->valor_constante.valor_int = 0;
+    nueva_entrada->valor_constante.valor_float = 0.0;
+    nueva_entrada->valor_constante.valor_cadena = NULL;
+    nueva_entrada->valor_constante.valor_bool = 0;
     nueva_entrada->siguiente_en_cubeta = tabla->cubetas[indice];
     tabla->cubetas[indice] = nueva_entrada;
 
-  
     return nueva_entrada;
-}
-EntradaSimbolo *buscar_simbolo(TablaSimbolos *tabla, const char *nombre) {
-    TablaSimbolos *tabla_actual = tabla;
-    while (tabla_actual != NULL) {
-        unsigned int indice = calcular_hash(nombre);
-        EntradaSimbolo *entrada = tabla_actual->cubetas[indice];
-        while (entrada != NULL) {
-            if (strcmp(entrada->nombre, nombre) == 0) {
-                return entrada;
-            }
-            entrada = entrada->siguiente_en_cubeta;
-        }
-        tabla_actual = tabla_actual->padre;
-    }
-    return NULL;
 }
 
 EntradaSimbolo *buscar_simbolo_en_ambito_actual(TablaSimbolos *tabla, const char *nombre) {
-    if (tabla == NULL || nombre == NULL) return NULL;
-
+    if (tabla == NULL || nombre == NULL) {
+        return NULL;
+    }
     unsigned int indice = calcular_hash(nombre);
-
-    EntradaSimbolo *entrada = tabla->cubetas[indice];
-    while (entrada != NULL) {
-        if (strcmp(entrada->nombre, nombre) == 0) {
-            return entrada;
+    EntradaSimbolo *actual = tabla->cubetas[indice];
+    while (actual != NULL) {
+        if (strcmp(actual->nombre, nombre) == 0) {
+            return actual;
         }
-        entrada = entrada->siguiente_en_cubeta;
+        actual = actual->siguiente_en_cubeta;
     }
     return NULL;
 }
 
-void imprimir_tabla_simbolos(TablaSimbolos *tabla) {
+EntradaSimbolo *buscar_simbolo(TablaSimbolos *tabla, const char *nombre) {
+    TablaSimbolos *actual_ambito = tabla;
+    while (actual_ambito != NULL) {
+        EntradaSimbolo *encontrado = buscar_simbolo_en_ambito_actual(actual_ambito, nombre);
+        if (encontrado != NULL) {
+            return encontrado;
+        }
+        actual_ambito = actual_ambito->padre;
+    }
+    return NULL;
+}
+
+void imprimir_indentacion(int nivel) {
+    for (int i = 0; i < nivel * 4; i++) {
+        printf(" ");
+    }
+}
+
+void imprimir_jerarquia_tablas_simbolos(TablaSimbolos *tabla, int nivel) {
     if (tabla == NULL) {
-        printf("Tabla de simbolos vacia o NULL.\n");
         return;
     }
 
-    // Imprimir el ámbito actual
-    printf("\n--- Contenido del Ambito ID: %d (Padre ID: %d) ---\n",
+    imprimir_indentacion(nivel);
+    printf("--- Contenido del Ambito ID: %d (Padre ID: %d) ---\n",
            tabla->id_ambito, tabla->padre ? tabla->padre->id_ambito : -1);
 
     int simbolos_encontrados = 0;
     for (int i = 0; i < CUBETAS_TABLA_SIMBOLOS; i++) {
         EntradaSimbolo *entrada = tabla->cubetas[i];
         if (entrada != NULL) {
+            imprimir_indentacion(nivel);
             printf("  Cubeta %d:\n", i);
             while (entrada != NULL) {
-                printf("    - Nombre: '%s', Tipo: %s\n", entrada->nombre, tipoDatoToString(entrada->tipo));
+                imprimir_indentacion(nivel);
+                printf("    - Nombre: '%s'", entrada->nombre);
+                printf(", Tipo: %s", tipoDatoToString(entrada->tipo));
+                printf(", Rol: %s", entrada->es_constante ? "CONSTANTE" : "VARIABLE");
+
+                if (entrada->es_constante) {
+                    if (entrada->tipo == INT) {
+                        printf(", Valor: %d", entrada->valor_constante.valor_int);
+                    } else if (entrada->tipo == FLOAT) {
+                        printf(", Valor: %.2f", entrada->valor_constante.valor_float);
+                    } else if (entrada->tipo == STRING) {
+                        printf(", Valor: \"%s\"", entrada->valor_constante.valor_cadena);
+                    } else if (entrada->tipo == BOOL) {
+                        printf(", Valor: %s", entrada->valor_constante.valor_bool ? "Verdadero" : "Falso");
+                    }
+                }
+                printf("\n");
                 simbolos_encontrados++;
                 entrada = entrada->siguiente_en_cubeta;
             }
@@ -145,12 +181,30 @@ void imprimir_tabla_simbolos(TablaSimbolos *tabla) {
     }
 
     if (simbolos_encontrados == 0) {
+        imprimir_indentacion(nivel);
         printf("  (Este ambito esta vacio)\n");
     }
+    imprimir_indentacion(nivel);
     printf("------------------------------------------\n");
 
-    // Recorrer e imprimir los ámbitos padre recursivamente
-    if (tabla->padre != NULL) {
-        imprimir_tabla_simbolos(tabla->padre);
+    for (int i = 0; i < tabla->num_hijos; i++) {
+        imprimir_jerarquia_tablas_simbolos(tabla->hijos[i], nivel + 1);
     }
+}
+
+EntradaSimbolo *buscar_simbolo_ambitos(TablaSimbolos *ambito, const char *nombre)
+{
+    TablaSimbolos *actual = ambito;
+    EntradaSimbolo *simbolo = NULL;
+
+    while (actual != NULL)
+    {
+        simbolo = buscar_simbolo(actual, nombre);
+        if (simbolo != NULL)
+        {
+            return simbolo;
+        }
+        actual = actual->padre;  // sube al ámbito padre
+    }
+    return NULL;
 }

@@ -3,8 +3,9 @@
 
 #include "parser.h"
 #include "types.h"
+#include "symbols.h"
 
-void realizar_analisis_semantico(ASTNode *raiz_ast);
+TablaSimbolos *realizar_analisis_semantico(ASTNode *raiz_ast);
 void reportar_error_semantico(int renglon, int columna, const char *formato, ...);
 void visit_ast_semantic(ASTNode *node);
 void imprimir_errores_semanticos();
@@ -14,7 +15,7 @@ enum TipoDato verificar_expresion_comparacion(int renglon, int columna, enum Tip
 enum TipoDato verificar_expresion_logica(int renglon, int columna, enum TipoDato tipo1, enum TipoDato tipo2);
 enum TipoDato verificar_negacion_unaria(int renglon, int columna, enum TipoDato tipo);
 enum TipoDato verificar_negacion_logica(int renglon, int columna, enum TipoDato tipo);
-
+void inicializarTablaSimbolos();
 const char *tipoDatoToString(enum TipoDato tipo);
 
 #endif // ANALIZADOR_SEMANTICO_H

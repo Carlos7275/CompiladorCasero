@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter","Booleano", "Paso", "Verdadero", "Falso"};
+const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante"};
 
 void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
@@ -28,10 +28,10 @@ void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
     }
     lexema[i] = '\0';
 
-    enum TipoToken token_type = ID; 
-    enum TipoDato data_type = OTRO; 
+    enum TipoToken token_type = ID;
+    enum TipoDato data_type = OTRO;
 
-    data_type = EsPalabraReservadaConTipo(lexema,&token_type);
+    data_type = EsPalabraReservadaConTipo(lexema, &token_type);
     generarToken(token_type, lexema, data_type, Col, Renglon);
 }
 
@@ -63,7 +63,7 @@ void EsCadena(FILE *archivo, char car, int Col, int Renglon)
 
     if (FlagError == 0)
     {
-        generarToken(CAD, lexema, 4, Col, Renglon);
+        generarToken(CAD, lexema, STRING, Col, Renglon);
     }
     else
     {
@@ -108,7 +108,7 @@ void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
         // Caracteres que DEBEN terminar el número pero NO son parte de él
         else if (isspace(next_char) || next_char == ';' ||
                  next_char == '+' || next_char == '-' ||
-                 next_char == '*' || next_char == '/' ||
+                 next_char == '*' || next_char == '/' || next_char == '%' ||
                  next_char == '=' || next_char == '<' || next_char == '>' ||
                  next_char == '!' || next_char == '&' || next_char == '|' ||
                  next_char == '(' || next_char == ')' ||
@@ -125,12 +125,10 @@ void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
         }
     }
 
-    lexema[i] = '\0'; // Terminar cadena del lexema
+    lexema[i] = '\0';
 
-    // Generar token: 0 para entero, 3 para float (manteniendo tus valores originales)
-    // Se recomienda usar el enum TokenType para mayor claridad (NUM_ENTERO, NUM_FLOTANTE)
-    int tipoDato = (cantPuntos == 0) ? 0 : 3;
-    generarToken(2, lexema, tipoDato, Col, Renglon);
+    int tipoDato = (cantPuntos == 0) ? INT : FLOAT;
+    generarToken(NUM, lexema, tipoDato, Col, Renglon);
 }
 
 enum TipoDato EsPalabraReservadaConTipo(const char *lexema, enum TipoToken *out_tipo_token)
@@ -211,7 +209,10 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
         lexema[i] = '\0';                               // Aseguramos que sea nulo-terminado después del único carácter
         generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operadores Aritméticos simples
         break;
-
+    case '%':
+        lexema[i] = '\0';
+        generarToken(OPAR, lexema, OTRO, Col, Renglon);
+        break;
     case '=':
         next_char_val = fgetc(archivo); // Miramos el siguiente carácter
         if (next_char_val == '=')

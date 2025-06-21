@@ -1,60 +1,38 @@
-// Este es un comentario. Asegúrate de que tu lexer pueda ignorar los comentarios de línea simple (//).
+Constante Entero MI_CONSTANTE = 10;
+Entero x = 5;
+Flotante y = 2.5;
+Booleano esValido = Verdadero;
 
-// Declaraciones y asignaciones de variables
-Entero valorNumerico = 15;
 
-Booleano valor = Verdadero;
-Cadena mensajeBienvenida = "Bienvenido al mundo de ";
-Cadena nombreLenguaje = "mi lenguaje!";
-Flotante precioUnitario = 15.75; // Asumiendo que 'Flotante' es un tipo de dato válido
+Entero resultado = x + 7 * y / 2 - 1;
 
-// Sentencia Mostrar con múltiples argumentos
-Mostrar(mensajeBienvenida, nombreLenguaje, " Version 1.0");
+Cadena mensaje = "Carlos";
 
-// Sentencia Leer
-// Leer(nombreLenguaje); // Descomenta si quieres probar la entrada de usuario
+Flotante a = 5%5;
+Mostrar(x);
 
-// Bucle Mientras con una condición compleja
-Mientras(valorNumerico > 0 && precioUnitario < 20.0 || valorNumerico == 5){
-    Mostrar("Iteracion actual: ", valorNumerico);
-    
-    // Asignación dentro del bucle
-    valorNumerico = valorNumerico - 1; 
-
-    // Sentencia condicional Si-Sino Si-Sino anidada
-    Si(valorNumerico == 7){
-        Mostrar("Valor numerico es 7.");
-    }
-    Sino Si(valorNumerico == 3){
-        Mostrar("Valor numerico es 3. Casi al final!");
+Para(Entero k1 = 1; k1 < 10; k1++){
+    Entero otroValor = x;
+    Entero a = PI;
+    Mostrar("Iteracion K: ", k1);
+    Si (otroValor > 5) {
+        Mostrar("Otro valor es grande!");
+        Romper;
     }
     Sino{
-        Mostrar("Valor numerico es: ", valorNumerico, ". Continuando...");
+        Mostrar("Jajajaja");
+        Continuar;
     }
+    
 }
 
-Mostrar("Bucle Mientras finalizado. Valor final: ", valorNumerico);
+Mientras (x + y >5) {
+    Entero e = x;
 
-// Bucle Para con inicialización de variable y operador de incremento
-Para(Entero i = 0; i < 5; i++){
-    Mostrar("Bucle Para - Indice: ", i);
-    // Asignacion y operacion aritmetica
-    valorNumerico = valorNumerico + i; 
+    x = x + 1;
 }
 
-Mostrar("Bucle Para finalizado. Nuevo valor numerico: ", valorNumerico);
+esValido = Verdadero;
 
-// Otra sentencia Si-Sino con condiciones simples
-Si(valorNumerico >= 15){
-    Mostrar("Valor numerico es grande!");
-}
-Sino{
-    Mostrar("Valor numerico es pequeño.");
-}
-
-// Asignación con una expresión más compleja
-Entero resultadoCalculo = (valorNumerico * 2 + 5) / 3;
-Mostrar("El resultado del calculo es: ", resultadoCalculo);
-
-// Fin del programa
-
+Cadena testIncompleto = "Esto no termina";
+Entero siguienteDeclaracion = 100;
