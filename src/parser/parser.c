@@ -95,14 +95,14 @@ ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
     return newNode;
 }
 
-void liberarAST(ASTNode *node)
+void liberar_ast(ASTNode *node)
 {
     if (node == NULL)
         return;
 
-    liberarAST(node->hijo_izq);
-    liberarAST(node->hijo_der);
-    liberarAST(node->siguiente_hermano);
+    liberar_ast(node->hijo_izq);
+    liberar_ast(node->hijo_der);
+    liberar_ast(node->siguiente_hermano);
 
     if (node->type == AST_IDENTIFICADOR && node->valor.nombre_id != NULL)
     {
@@ -392,32 +392,68 @@ ASTNode *parseDeclaracionConstante()
 ASTNode *parseAsignacion()
 {
     struct Token *id_token = peekToken();
-    if (id_token == NULL || id_token->TipoToken != ID)
-    {
-        fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba un identificador para la asignación.\n",
-                id_token ? id_token->Renglon : -1, id_token ? id_token->Columna : -1);
-        exit(EXIT_FAILURE);
-    }
     match(ID, NULL);
 
-    ASTNode *id_node = crearNodoAST(AST_IDENTIFICADOR, id_token->Renglon, id_token->Columna);
-    id_node->valor.nombre_id = strdup(id_token->Lexema);
+    ASTNode *id_node_lhs = crearNodoAST(AST_IDENTIFICADOR, id_token->Renglon, id_token->Columna);
+    id_node_lhs->valor.nombre_id = strdup(id_token->Lexema);
 
-    match(OPASIGN, "=");
+    struct Token *next = peekToken();
 
-    ASTNode *expr_node = parseExpresion();
-    if (expr_node == NULL)
+    if (next == NULL)
     {
-        fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba una expresión después del operador de asignación.\n",
-                peekToken() ? peekToken()->Renglon : id_token->Renglon, peekToken() ? peekToken()->Columna : id_token->Columna);
+        fprintf(stderr, "Error de sintaxis: Se esperaba '=', '++' o '--' después del identificador.\n");
         exit(EXIT_FAILURE);
     }
 
-    ASTNode *asignacion_node = crearNodoAST(AST_ASIGNACION_STMT, id_token->Renglon, id_token->Columna);
-    asignacion_node->hijo_izq = id_node;
-    asignacion_node->hijo_der = expr_node;
-    return asignacion_node;
+    if (next->TipoToken == OPASIGN)
+    {
+        match(OPASIGN, "=");
+
+        ASTNode *expr_node = parseExpresion();
+
+        ASTNode *asignacion_node = crearNodoAST(AST_ASIGNACION_STMT, id_token->Renglon, id_token->Columna);
+        asignacion_node->hijo_izq = id_node_lhs;
+        asignacion_node->hijo_der = expr_node;
+        return asignacion_node;
+    }
+    else if (strcmp(next->Lexema, "++") == 0 || strcmp(next->Lexema, "--") == 0)
+    {
+        match(next->TipoToken, next->Lexema);  // Consume ++ o --
+
+        // Crear RHS: x + 1 o x - 1
+        ASTNode *id_node_rhs = crearNodoAST(AST_IDENTIFICADOR, id_token->Renglon, id_token->Columna);
+        id_node_rhs->valor.nombre_id = strdup(id_token->Lexema);
+
+        ASTNode *literal_one = crearNodoAST(AST_LITERAL_ENTERO, next->Renglon, next->Columna);
+        literal_one->valor.valor_numero = 1;
+        literal_one->declared_type_info = INT;
+
+        ASTNode *op_node;
+        if (strcmp(next->Lexema, "++") == 0)
+        {
+            op_node = crearNodoAST(AST_SUMA_EXPR, next->Renglon, next->Columna);
+        }
+        else
+        {
+            op_node = crearNodoAST(AST_RESTA_EXPR, next->Renglon, next->Columna);
+        }
+
+        op_node->hijo_izq = id_node_rhs;
+        op_node->hijo_der = literal_one;
+
+        ASTNode *asignacion_node = crearNodoAST(AST_ASIGNACION_STMT, id_token->Renglon, id_token->Columna);
+        asignacion_node->hijo_izq = id_node_lhs;
+        asignacion_node->hijo_der = op_node;
+        return asignacion_node;
+    }
+    else
+    {
+        fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba '=', '++' o '--' después del identificador.\n",
+                next->Renglon, next->Columna);
+        exit(EXIT_FAILURE);
+    }
 }
+
 
 ASTNode *parseUpdateStatement()
 {
@@ -1151,7 +1187,7 @@ const char *ASTNodeTypeNames[] = {
 const char *DataTypeNames[] = {
     "Entero", "Cadena", "Caracter", "Flotante", "Booleano", "Otro"};
 
-void ImprimirAST(ASTNode *node, int indent_level)
+void imprimir_ast(ASTNode *node, int indent_level)
 {
     if (node == NULL)
         return;
@@ -1203,7 +1239,7 @@ void ImprimirAST(ASTNode *node, int indent_level)
     }
     printf(" (R%d, C%d)\n", node->renglon, node->columna);
 
-    ImprimirAST(node->hijo_izq, indent_level + 1);
-    ImprimirAST(node->hijo_der, indent_level + 1);
-    ImprimirAST(node->siguiente_hermano, indent_level);
+    imprimir_ast(node->hijo_izq, indent_level + 1);
+    imprimir_ast(node->hijo_der, indent_level + 1);
+    imprimir_ast(node->siguiente_hermano, indent_level);
 }

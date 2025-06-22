@@ -116,6 +116,6 @@ ASTNode *parseTermino();
 ASTNode *parseFactor();
 
 ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna);
-void liberarAST(ASTNode *node);
-void ImprimirAST(ASTNode *node, int indent_level);
+void liberar_ast(ASTNode *node);
+void imprimir_ast(ASTNode *node, int indent_level);
 #endif

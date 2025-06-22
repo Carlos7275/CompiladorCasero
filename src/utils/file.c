@@ -6,12 +6,12 @@
 int Renglon = 1, Col = 0;
 
 // Lee un archivo en modo lectura y lo regresa
-FILE *LeerArchivo(const char *archivo)
+FILE *leer_archivo(const char *archivo)
 {
     return fopen(archivo, "r");
 }
 
-void AnalizarArchivo(FILE *archivo)
+void analizar_archivo(FILE *archivo)
 {
     int car;
     while ((car = fgetc(archivo)) != EOF)

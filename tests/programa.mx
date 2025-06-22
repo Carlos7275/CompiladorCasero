@@ -1,38 +1,12 @@
-Constante Entero MI_CONSTANTE = 10;
-Entero x = 5;
-Flotante y = 2.5;
-Booleano esValido = Verdadero;
+//Algoritmo para calcular el factorial de un numero
+Entero numero = 0;
+Entero factorial = 1;
+Mostrar("Ingrese un numero:");
+Leer(numero);
 
 
-Entero resultado = x + 7 * y / 2 - 1;
-
-Cadena mensaje = "Carlos";
-
-Flotante a = 5%5;
-Mostrar(x);
-
-Para(Entero k1 = 1; k1 < 10; k1++){
-    Entero otroValor = x;
-    Entero a = PI;
-    Mostrar("Iteracion K: ", k1);
-    Si (otroValor > 5) {
-        Mostrar("Otro valor es grande!");
-        Romper;
-    }
-    Sino{
-        Mostrar("Jajajaja");
-        Continuar;
-    }
-    
+Para(Entero i=1;i<=numero;i++){
+    factorial=factorial*i;
 }
 
-Mientras (x + y >5) {
-    Entero e = x;
-
-    x = x + 1;
-}
-
-esValido = Verdadero;
-
-Cadena testIncompleto = "Esto no termina";
-Entero siguienteDeclaracion = 100;
+Mostrar("El factorial de ",numero," Es:",factorial,"\n");

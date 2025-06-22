@@ -5,7 +5,9 @@
 
 #include "parser.h"
 #include "symbols.h"
+#include "ctype.h"
 
+#define MAX_BUFFER 1024
 int ir_current_size = 0;
 int ir_capacity = 0;
 Quadruple *ir_code;
@@ -74,7 +76,7 @@ static void generate_code_for_if_statement(ASTNode *if_node);
 static void generate_code_for_while_statement(ASTNode *while_node);
 static void generate_code_for_for_statement(ASTNode *for_node);
 
-void generate_intermediate_code(ASTNode *root_ast_node, TablaSimbolos *global_sym_table)
+void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym_table)
 {
     if (!root_ast_node)
     {
@@ -85,6 +87,7 @@ void generate_intermediate_code(ASTNode *root_ast_node, TablaSimbolos *global_sy
     ambito_actual = global_sym_table;
 
     generate_code_for_node(root_ast_node);
+    optimize_ir_code();
 
     emit_quad(IR_HALT, NULL, NULL, NULL);
 }
@@ -456,9 +459,13 @@ static void generate_code_for_statement(ASTNode *stmt_node)
     }
     case AST_MOSTRAR_STMT:
     {
-
-        char *print_arg = generate_code_for_expression(stmt_node->hijo_izq);
-        emit_quad(IR_PRINT, print_arg, NULL, NULL);
+        ASTNode *current = stmt_node->hijo_izq;
+        while (current)
+        {
+            char *print_arg = generate_code_for_expression(current);
+            emit_quad(IR_PRINT, print_arg, NULL, NULL);
+            current = current->siguiente_hermano;
+        }
         break;
     }
     case AST_LEER_STMT:
@@ -555,24 +562,27 @@ static void generate_code_for_while_statement(ASTNode *while_node)
 static void generate_code_for_for_statement(ASTNode *for_node)
 {
     if (!for_node)
-    {
         return;
-    }
 
     ASTNode *for_params_node = for_node->hijo_izq;
     if (!for_params_node || for_params_node->type != AST_PARA_PARAMS)
     {
-        fprintf(stderr, "Error at %d:%d: Error interno: Estructura AST inesperada para el bucle 'Para'.\n", for_node->renglon, for_node->columna);
+        fprintf(stderr, "Error at %d:%d: Estructura AST inesperada para el bucle 'Para'.\n",
+                for_node->renglon, for_node->columna);
         return;
     }
 
     ASTNode *init_node = for_params_node->hijo_izq;
-    ASTNode *condition_node = for_params_node->hijo_der;
+    ASTNode *condition_node = NULL;
     ASTNode *increment_node = NULL;
-    if (condition_node != NULL)
+
+    if (init_node)
     {
-        increment_node = condition_node->siguiente_hermano;
+        condition_node = init_node->siguiente_hermano;
+        if (condition_node)
+            increment_node = condition_node->siguiente_hermano;
     }
+
     ASTNode *body_node = for_node->hijo_der;
 
     char *loop_condition_label = new_label();
@@ -582,20 +592,17 @@ static void generate_code_for_for_statement(ASTNode *for_node)
     push_loop_labels(loop_end_label, loop_increment_label);
 
     if (init_node)
-    {
         generate_code_for_node(init_node);
-    }
 
     emit_quad(IR_LABEL, NULL, NULL, loop_condition_label);
 
     char *condition_result = NULL;
-    if (condition_node != NULL)
-    {
+    if (condition_node)
         condition_result = generate_code_for_expression(condition_node);
-    }
     else
     {
-        condition_result = strdup("1"); // condición siempre verdadera
+        condition_result = new_temp();
+        emit_quad(IR_ASSIGN, "1", NULL, condition_result);
     }
 
     emit_quad(IR_IF_FALSE_GOTO, condition_result, NULL, loop_end_label);
@@ -603,10 +610,9 @@ static void generate_code_for_for_statement(ASTNode *for_node)
     generate_code_for_node(body_node);
 
     emit_quad(IR_LABEL, NULL, NULL, loop_increment_label);
+
     if (increment_node)
-    {
-        generate_code_for_expression(increment_node);
-    }
+        generate_code_for_node(increment_node);
 
     emit_quad(IR_GOTO, NULL, NULL, loop_condition_label);
 
@@ -628,7 +634,7 @@ int get_ir_code_size()
     return ir_current_size;
 }
 
-void print_intermediate_code()
+void imprimir_codigo_intermedio()
 {
     printf("\n--- Código Intermedio (Cuádruplos) ---\n");
     for (int i = 0; i < ir_current_size; i++)
@@ -717,4 +723,765 @@ void print_intermediate_code()
         printf("%s)\n", q.result ? q.result : "NULL");
     }
     printf("---------------------------------------\n");
+}
+
+static int es_entero(const char *s)
+{
+    if (!s)
+        return 0;
+    for (int i = 0; s[i]; i++)
+    {
+        if (!isdigit(s[i]) && !(i == 0 && s[i] == '-'))
+            return 0;
+    }
+    return 1;
+}
+
+static int es_flotante(const char *s)
+{
+    if (!s)
+        return 0;
+    int punto = 0;
+    for (int i = 0; s[i]; i++)
+    {
+        if (s[i] == '.')
+            punto++;
+        else if (!isdigit(s[i]) && !(i == 0 && s[i] == '-'))
+            return 0;
+    }
+    return punto == 1;
+}
+
+static int usar_temp(const char *temp, int desde)
+{
+    for (int i = desde; i < ir_current_size; i++)
+    {
+        if ((ir_code[i].arg1 && strcmp(ir_code[i].arg1, temp) == 0) ||
+            (ir_code[i].arg2 && strcmp(ir_code[i].arg2, temp) == 0))
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int es_literal(const char *s)
+{
+    if (!s)
+        return 0;
+
+    char *endptr;
+    strtod(s, &endptr);
+    return *endptr == '\0';
+}
+void optimize_ir_code()
+{
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        Quadruple *q = &ir_code[i];
+
+        if (q->arg1 && q->arg2 && q->result &&
+            es_literal(q->arg1) && es_literal(q->arg2))
+        {
+            double a = atof(q->arg1);
+            double b = atof(q->arg2);
+            double r;
+            int valido = 1;
+
+            switch (q->op)
+            {
+            case IR_ADD:
+                r = a + b;
+                break;
+            case IR_SUB:
+                r = a - b;
+                break;
+            case IR_MUL:
+                r = a * b;
+                break;
+            case IR_DIV:
+                if (b != 0)
+                    r = a / b;
+                else
+                    valido = 0;
+                break;
+            case IR_MOD:
+                if ((int)b != 0)
+                    r = (int)a % (int)b;
+                else
+                    valido = 0;
+                break;
+            default:
+                valido = 0;
+                break;
+            }
+
+            if (valido)
+            {
+                char buffer[64];
+                if (r == (int)r)
+                    sprintf(buffer, "%d", (int)r);
+                else
+                    sprintf(buffer, "%f", r);
+
+                q->op = IR_ASSIGN;
+                free(q->arg1);
+                free(q->arg2);
+                q->arg1 = strdup(buffer);
+                q->arg2 = NULL;
+            }
+        }
+
+        if (q->op == IR_ASSIGN && q->arg1 && q->result && q->result[0] == 't')
+        {
+            const char *src = q->arg1;
+            const char *dest = q->result;
+
+            for (int j = i + 1; j < ir_current_size; j++)
+            {
+                Quadruple *q2 = &ir_code[j];
+
+                if (q2->arg1 && strcmp(q2->arg1, dest) == 0)
+                {
+                    free(q2->arg1);
+                    q2->arg1 = strdup(src);
+                }
+                if (q2->arg2 && strcmp(q2->arg2, dest) == 0)
+                {
+                    free(q2->arg2);
+                    q2->arg2 = strdup(src);
+                }
+
+                if (q2->result && strcmp(q2->result, dest) == 0)
+                    break;
+            }
+        }
+    }
+
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        Quadruple *q = &ir_code[i];
+        if (q->result && q->result[0] == 't')
+        {
+            if (!usar_temp(q->result, i + 1))
+            {
+                free(q->arg1);
+                free(q->arg2);
+                free(q->result);
+                q->arg1 = q->arg2 = q->result = NULL;
+                q->op = -1;
+            }
+        }
+    }
+
+    int nueva_pos = 0;
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        if (ir_code[i].op != -1)
+        {
+            if (i != nueva_pos)
+                ir_code[nueva_pos] = ir_code[i];
+            nueva_pos++;
+        }
+    }
+    ir_current_size = nueva_pos;
+}
+
+int is_number(const char *s)
+{
+    if (!s)
+        return 0;
+    int i = 0;
+    if (s[0] == '-' || s[0] == '+')
+        i = 1;
+    int has_digit = 0, has_dot = 0;
+    for (; s[i]; i++)
+    {
+        if (isdigit(s[i]))
+            has_digit = 1;
+        else if (s[i] == '.' && !has_dot)
+            has_dot = 1;
+        else
+            return 0;
+    }
+    return has_digit;
+}
+
+int is_string_literal(const char *s)
+{
+    if (!s)
+        return 0;
+    int len = strlen(s);
+    return (len >= 2 && s[0] == '"' && s[len - 1] == '"');
+}
+
+int is_valid_varname(const char *s)
+{
+    if (!s || !s[0])
+        return 0;
+    if (!(isalpha(s[0]) || s[0] == '_'))
+        return 0;
+    for (int i = 1; s[i]; i++)
+    {
+        if (!(isalnum(s[i]) || s[i] == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+int var_declared(const char vars[][64], int count, const char *name)
+{
+    for (int i = 0; i < count; i++)
+    {
+        if (strcmp(vars[i], name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+int string_declared(const char labels[][64], int count, const char *str)
+{
+    for (int i = 0; i < count; i++)
+    {
+        if (strcmp(labels[i], str) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+void sanitize_label(const char *input, char *output, int max_len)
+{
+
+    int j = 0;
+    output[j++] = 's';
+    output[j++] = 't';
+    output[j++] = 'r';
+    output[j++] = '_';
+    for (int i = 1; input[i] != '\0' && input[i] != '"' && j < max_len - 1; i++)
+    {
+        if (isalnum(input[i]) || input[i] == '_')
+            output[j++] = input[i];
+        else
+            output[j++] = '_';
+    }
+    output[j] = '\0';
+}
+
+void print_asm_string_literal(FILE *f, const char *str)
+{
+    int in_quotes = 0;
+    int first = 1;
+
+    while (*str)
+    {
+        if (*str == '\\')
+        {
+            str++;
+            if (*str == '\0')
+                break;
+
+            // Cerrar cadena si está abierta para imprimir byte numérico
+            if (in_quotes)
+            {
+                fprintf(f, "\"");
+                in_quotes = 0;
+            }
+
+            if (!first)
+                fprintf(f, ", ");
+
+            switch (*str)
+            {
+            case 'n':
+                fprintf(f, "10");
+                break;
+            case 't':
+                fprintf(f, "9");
+                break;
+            case 'r':
+                fprintf(f, "13");
+                break;
+            case 'b':
+                fprintf(f, "8");
+                break;
+            case 'f':
+                fprintf(f, "12");
+                break;
+            case 'v':
+                fprintf(f, "11");
+                break;
+            case '0':
+                fprintf(f, "0");
+                break;
+            case '\\':
+                if (!first)
+                    fprintf(f, ", ");
+                fprintf(f, "\"\\\\\"");
+                first = 0;
+                break;
+            case '"':
+                if (!first)
+                    fprintf(f, ", ");
+                fprintf(f, "\"\\\"\"");
+                first = 0;
+                break;
+            default:
+                if (!first)
+                    fprintf(f, ", ");
+                fprintf(f, "\"\\%c\"", *str);
+                first = 0;
+                break;
+            }
+            first = 0;
+        }
+        else
+        {
+            // Abrir comillas si no están abiertas
+            if (!in_quotes)
+            {
+                if (!first)
+                    fprintf(f, ", ");
+                fputc('"', f);
+                in_quotes = 1;
+            }
+            fputc(*str, f);
+            first = 0;
+        }
+        str++;
+    }
+
+    if (in_quotes)
+        fprintf(f, "\"");
+}
+
+const char *strip_quotes(const char *s)
+{
+    size_t len = strlen(s);
+    if (len >= 2 && s[0] == '"' && s[len - 1] == '"')
+    {
+        static char buffer[1024];
+        strncpy(buffer, s + 1, len - 2);
+        buffer[len - 2] = '\0';
+        return buffer;
+    }
+    return s;
+}
+void generate_asm(FILE *f)
+{
+    char declared_vars[MAX_BUFFER][64];
+    int declared_vars_count = 0;
+
+    // Sección .data con formatos
+    fprintf(f, "section .data\n");
+    fprintf(f, "fmt_int db \"%%ld\", 0\n");
+    fprintf(f, "fmt_float db \"%%lf\", 10, 0\n");
+    fprintf(f, "fmt_str db \"%%s\", 0\n");
+    fprintf(f, "fmt_read_int db \"%%ld\", 0\n");
+    fprintf(f, "fmt_read_float db \"%%lf\", 0\n");
+    fprintf(f, "fmt_read_str db \"%%255s\", 0\n");
+
+    // Literales string para impresión
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        Quadruple *q = &ir_code[i];
+        if (q->op == IR_PRINT && is_string_literal(q->arg1))
+        {
+            fprintf(f, "str_%d db ", i);
+            print_asm_string_literal(f, strip_quotes(q->arg1));
+            fprintf(f, ", 0\n");
+        }
+    }
+
+    // Variables en .bss
+    fprintf(f, "section .bss\n");
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        Quadruple *q = &ir_code[i];
+        const char *args[] = {q->arg1, q->arg2, q->result};
+        for (int j = 0; j < 3; j++)
+        {
+            const char *var = args[j];
+            if (var && is_valid_varname(var) && !var_declared(declared_vars, declared_vars_count, var))
+            {
+                if (!(var[0] == 'L' && isdigit((unsigned char)var[1])))
+                {
+                    strcpy(declared_vars[declared_vars_count++], var);
+                    EntradaSimbolo *entry = buscar_simbolo(ambito_actual, var);
+                    if (entry != NULL && entry->tipo == STRING)
+                        fprintf(f, "    %s resb 256\n", var);
+                    else
+                        fprintf(f, "    %s resq 1\n", var);
+                }
+            }
+        }
+    }
+
+    // Código principal
+    fprintf(f, "section .text\n");
+    fprintf(f, "global main\n");
+    fprintf(f, "extern printf\n");
+    fprintf(f, "extern scanf\n");
+
+    fprintf(f, "main:\n");
+    fprintf(f, "    push rbp\n");
+    fprintf(f, "    mov rbp, rsp\n");
+
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        Quadruple *q = &ir_code[i];
+
+        if (q->op == IR_LABEL)
+        {
+            fprintf(f, "%s:\n", q->result);
+            continue;
+        }
+
+        switch (q->op)
+        {
+        case IR_ASSIGN:
+            if (is_number(q->arg1))
+                fprintf(f, "    mov rax, %s\n    mov [rel %s], rax\n", q->arg1, q->result);
+            else
+                fprintf(f, "    mov rax, [rel %s]\n    mov [rel %s], rax\n", q->arg1, q->result);
+            break;
+
+        case IR_ADD:
+        case IR_SUB:
+        case IR_MUL:
+        case IR_DIV:
+        case IR_MOD:
+        {
+            const char *op;
+            if (q->op == IR_ADD) op = "add";
+            else if (q->op == IR_SUB) op = "sub";
+            else if (q->op == IR_MUL) op = "imul";
+            else if (q->op == IR_DIV || q->op == IR_MOD) op = "idiv";
+            else op = "";
+
+            if (q->op == IR_DIV || q->op == IR_MOD)
+            {
+                if (es_literal(q->arg1))
+                    fprintf(f, "    mov rax, %s\n", q->arg1);
+                else
+                    fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+                fprintf(f, "    cqo\n");
+
+                if (es_literal(q->arg2))
+                    fprintf(f, "    mov rbx, %s\n", q->arg2);
+                else
+                    fprintf(f, "    mov rbx, [rel %s]\n", q->arg2);
+
+                fprintf(f, "    idiv rbx\n");
+
+                if (q->op == IR_DIV)
+                    fprintf(f, "    mov [rel %s], rax\n", q->result);
+                else
+                    fprintf(f, "    mov [rel %s], rdx\n", q->result);
+            }
+            else
+            {
+                if (es_literal(q->arg1))
+                    fprintf(f, "    mov rax, %s\n", q->arg1);
+                else
+                    fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+
+                if (es_literal(q->arg2))
+                    fprintf(f, "    %s rax, %s\n", op, q->arg2);
+                else
+                    fprintf(f, "    %s rax, [rel %s]\n", op, q->arg2);
+
+                fprintf(f, "    mov [rel %s], rax\n", q->result);
+            }
+            break;
+        }
+
+        case IR_NEG:
+            if (es_literal(q->arg1))
+                fprintf(f, "    mov rax, %s\n", q->arg1);
+            else
+                fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+            fprintf(f, "    neg rax\n");
+            fprintf(f, "    mov [rel %s], rax\n", q->result);
+            break;
+
+        case IR_LT:
+        case IR_GT:
+        case IR_LE:
+        case IR_GE:
+        case IR_EQ:
+        case IR_NE:
+        {
+            const char *cond;
+            switch (q->op)
+            {
+            case IR_LT: cond = "l"; break;
+            case IR_GT: cond = "g"; break;
+            case IR_LE: cond = "le"; break;
+            case IR_GE: cond = "ge"; break;
+            case IR_EQ: cond = "e"; break;
+            case IR_NE: cond = "ne"; break;
+            default: cond = "e"; break;
+            }
+
+            if (is_number(q->arg2))
+            {
+                fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+                fprintf(f, "    cmp rax, %s\n", q->arg2);
+            }
+            else
+            {
+                fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+                fprintf(f, "    cmp rax, [rel %s]\n", q->arg2);
+            }
+            fprintf(f, "    set%s al\n", cond);
+            fprintf(f, "    movzx rax, al\n");
+            fprintf(f, "    mov [rel %s], rax\n", q->result);
+            break;
+        }
+
+        case IR_AND:
+            fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+            fprintf(f, "    and rax, [rel %s]\n", q->arg2);
+            fprintf(f, "    mov [rel %s], rax\n", q->result);
+            break;
+
+        case IR_OR:
+            fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+            fprintf(f, "    or rax, [rel %s]\n", q->arg2);
+            fprintf(f, "    mov [rel %s], rax\n", q->result);
+            break;
+
+        case IR_NOT:
+            fprintf(f, "    mov rax, [rel %s]\n", q->arg1);
+            fprintf(f, "    cmp rax, 0\n");
+            fprintf(f, "    sete al\n");
+            fprintf(f, "    movzx rax, al\n");
+            fprintf(f, "    mov [rel %s], rax\n", q->result);
+            break;
+
+        case IR_PRINT:
+        {
+            EntradaSimbolo *entry = buscar_simbolo(ambito_actual, q->arg1);
+
+            fprintf(f,
+                "    %%ifdef WINDOWS\n"
+                "        "); 
+            if (is_string_literal(q->arg1))
+            {
+                fprintf(f,
+                    "lea rcx, [rel fmt_str]\n"
+                    "        lea rdx, [rel str_%d]\n"
+                    "        xor eax, eax\n"
+                    "        call printf\n",
+                    i);
+            }
+            else if (is_number(q->arg1))
+            {
+                fprintf(f,
+                    "lea rcx, [rel fmt_int]\n"
+                    "        mov rdx, %s\n"
+                    "        xor eax, eax\n"
+                    "        call printf\n",
+                    q->arg1);
+            }
+            else if (entry != NULL)
+            {
+                if (entry->tipo == STRING)
+                {
+                    fprintf(f,
+                        "lea rcx, [rel fmt_str]\n"
+                        "        lea rdx, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call printf\n",
+                        q->arg1);
+                }
+                else if (entry->tipo == FLOAT)
+                {
+                    fprintf(f,
+                        "lea rcx, [rel fmt_float]\n"
+                        "        movsd xmm0, qword [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call printf\n",
+                        q->arg1);
+                }
+                else
+                {
+                    fprintf(f,
+                        "lea rcx, [rel fmt_int]\n"
+                        "        mov rdx, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call printf\n",
+                        q->arg1);
+                }
+            }
+            fprintf(f, "    %%else\n        ");
+            if (is_string_literal(q->arg1))
+            {
+                fprintf(f,
+                    "lea rdi, [rel str_%d]\n"
+                    "        lea rsi, [rel fmt_str]\n"
+                    "        xor eax, eax\n"
+                    "        call printf\n",
+                    i);
+            }
+            else if (is_number(q->arg1))
+            {
+                fprintf(f,
+                    "mov rsi, %s\n"
+                    "        lea rdi, [rel fmt_int]\n"
+                    "        xor eax, eax\n"
+                    "        call printf\n",
+                    q->arg1);
+            }
+            else if (entry != NULL)
+            {
+                if (entry->tipo == STRING)
+                {
+                    fprintf(f,
+                        "lea rdi, [rel %s]\n"
+                        "        lea rsi, [rel fmt_str]\n"
+                        "        xor eax, eax\n"
+                        "        call printf\n",
+                        q->arg1);
+                }
+                else if (entry->tipo == FLOAT)
+                {
+                    fprintf(f,
+                        "movsd xmm0, qword [rel %s]\n"
+                        "        lea rdi, [rel fmt_float]\n"
+                        "        mov eax, 1\n"
+                        "        call printf\n",
+                        q->arg1);
+                }
+                else
+                {
+                    fprintf(f,
+                        "mov rsi, [rel %s]\n"
+                        "        lea rdi, [rel fmt_int]\n"
+                        "        xor eax, eax\n"
+                        "        call printf\n",
+                        q->arg1);
+                }
+            }
+            fprintf(f, "    %%endif\n");
+            break;
+        }
+
+        case IR_READ:
+        {
+            EntradaSimbolo *entry = buscar_simbolo(ambito_actual, q->result);
+
+            fprintf(f,
+                "    %%ifdef WINDOWS\n"
+                "        ");
+            if (entry != NULL)
+            {
+                if (entry->tipo == STRING)
+                {
+                    fprintf(f,
+                        "lea rcx, [rel fmt_read_str]\n"
+                        "        lea rdx, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call scanf\n",
+                        q->result);
+                }
+                else if (entry->tipo == FLOAT)
+                {
+                    fprintf(f,
+                        "lea rcx, [rel fmt_read_float]\n"
+                        "        lea rdx, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call scanf\n",
+                        q->result);
+                }
+                else
+                {
+                    fprintf(f,
+                        "lea rcx, [rel fmt_read_int]\n"
+                        "        lea rdx, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call scanf\n",
+                        q->result);
+                }
+            }
+            fprintf(f,
+                "    %%else\n        ");
+            if (entry != NULL)
+            {
+                if (entry->tipo == STRING)
+                {
+                    fprintf(f,
+                        "lea rdi, [rel fmt_read_str]\n"
+                        "        lea rsi, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call scanf\n",
+                        q->result);
+                }
+                else if (entry->tipo == FLOAT)
+                {
+                    fprintf(f,
+                        "lea rdi, [rel fmt_read_float]\n"
+                        "        lea rsi, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call scanf\n",
+                        q->result);
+                }
+                else
+                {
+                    fprintf(f,
+                        "lea rdi, [rel fmt_read_int]\n"
+                        "        lea rsi, [rel %s]\n"
+                        "        xor eax, eax\n"
+                        "        call scanf\n",
+                        q->result);
+                }
+            }
+            fprintf(f, "    %%endif\n");
+            break;
+        }
+
+        case IR_GOTO:
+            fprintf(f, "    jmp %s\n", q->result);
+            break;
+
+        case IR_IF_FALSE_GOTO:
+            if (is_number(q->arg1))
+            {
+                fprintf(f,
+                    "    mov rax, %s\n"
+                    "    cmp rax, 0\n"
+                    "    je %s\n",
+                    q->arg1, q->result);
+            }
+            else
+            {
+                fprintf(f,
+                    "    mov rax, [rel %s]\n"
+                    "    cmp rax, 0\n"
+                    "    je %s\n",
+                    q->arg1, q->result);
+            }
+            break;
+
+        case IR_HALT:
+            fprintf(f, "    mov eax, 0\n");
+            break;
+
+        default:
+            fprintf(f, "    ; Operación no implementada: %d\n", q->op);
+            break;
+        }
+    }
+
+    fprintf(f, "    pop rbp\n");
+
+    fprintf(f, "%%ifdef WINDOWS\n");
+    fprintf(f, "    extern ExitProcess\n");
+    fprintf(f, "    mov ecx, 0\n");
+    fprintf(f, "    call ExitProcess\n");
+    fprintf(f, "%%else\n");
+    fprintf(f, "    ret\n");
+    fprintf(f, "%%endif\n");
+
+    fprintf(f, "section .note.GNU-stack noalloc noexec nowrite progbits\n");
 }

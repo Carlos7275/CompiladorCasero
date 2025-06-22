@@ -27,7 +27,7 @@ void Insertar(struct Token token)
     }
 }
 
-void Imprimir(struct nodo *Nodo)
+void imprimir_lexico(struct nodo *Nodo)
 {
     if (Nodo != NULL)
     {
@@ -41,7 +41,7 @@ void Imprimir(struct nodo *Nodo)
             printf("\tValor:%lf", Nodo->info.valor);
         printf("\n----------------------------------------------------------------------------------------------\n");
 
-        Imprimir(Nodo->der);
+        imprimir_lexico(Nodo->der);
     }
 }
 

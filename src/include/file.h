@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-FILE *LeerArchivo(const char *ruta);
-void AnalizarArchivo(FILE *archivo);
+FILE *leer_archivo(const char *ruta);
+void analizar_archivo(FILE *archivo);
 
 #endif

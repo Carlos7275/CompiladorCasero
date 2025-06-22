@@ -5,7 +5,6 @@
 #include "symbols.h"
 #define INITIAL_IR_CAPACITY 128 // Capacidad inicial, puedes ajustarla
 
-
 typedef enum
 {
     IR_ADD,
@@ -52,7 +51,7 @@ void init_ir_generator();
  * @param global_sym_table Un puntero a la tabla de símbolos global, que permite
  * consultar información sobre variables y constantes.
  */
-void generate_intermediate_code(ASTNode *root_ast_node, TablaSimbolos *global_sym_table);
+void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym_table);
 
 /**
  * @brief Emite un cuádruplo y lo añade a la secuencia de código intermedio.
@@ -101,7 +100,11 @@ int get_ir_code_size();
 /**
  * @brief Imprime el código intermedio generado a la salida estándar.
  */
-void print_intermediate_code();
+void imprimir_codigo_intermedio();
+/**
+ * @brief Optimiza el CodigoIntermedio de todas sus operaciones.
+ */
+void optimize_ir_code();
 
-
+void generate_asm(FILE *f);
 #endif

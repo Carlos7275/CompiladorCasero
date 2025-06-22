@@ -1,0 +1,11 @@
+Cadena nombre;
+Entero edad;
+Flotante peso;
+
+Mostrar("Cual es su nombre:");
+Leer(nombre);
+Mostrar("Cual es su edad:");
+Leer(edad);
+Mostrar("Cual es su peso:");
+Leer(peso);
+Mostrar("Hola ",nombre," Edad: ",edad," Peso:",peso,"\n");
