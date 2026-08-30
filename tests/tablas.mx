@@ -1,0 +1,13 @@
+// Ejemplo: Tabla de multiplicar
+
+Entero numero = 0;
+
+Mostrar("Ingrese un numero para ver su tabla de multiplicar:\n");
+Leer(numero);
+
+Mostrar("Tabla del ", numero, ":\n");
+
+Para(Entero i = 1; i <= 10; i++){
+    Entero resultado = numero * i;
+    Mostrar(numero, " x ", i, " = ", resultado, "\n");
+}

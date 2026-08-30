@@ -85,35 +85,35 @@ typedef struct ASTNode
 
 } ASTNode;
 
-void iniciarParser();
+void iniciarParser(void);
 
-struct Token *peekToken();
+struct Token *peekToken(void);
 
-struct Token *consumirToken();
+struct Token *consumirToken(void);
 
 void match(enum TipoToken tipo_esperado, const char *lexema_esperado);
 
-ASTNode *parsePrograma();
-ASTNode *parseListaSentencias();
-ASTNode *parseSentenciaODeclaracion();
-ASTNode *parseDeclaracion();
-ASTNode *parseDeclaracionConstante();
-ASTNode *parseAsignacion();
-ASTNode *parseMostrarStmt();
-ASTNode *parseLeerStmt();
-ASTNode *parseSentenciaCondicional();
-ASTNode *parseSentenciaBucleMientras();
-ASTNode *parseSentenciaBuclePara();
-ASTNode *parseBloqueSentencias();
-ASTNode *parseSentencia();
-ASTNode *parseExpresion();
-ASTNode *parseExpresionOR();
-ASTNode *parseExpresionAND();
-ASTNode *parseExpresionNOT();
-ASTNode *parseExpresionComparacion();
-ASTNode *parseExpresionAritmetica();
-ASTNode *parseTermino();
-ASTNode *parseFactor();
+ASTNode *parsePrograma(void);
+ASTNode *parseListaSentencias(void);
+ASTNode *parseSentenciaODeclaracion(void);
+ASTNode *parseDeclaracion(void);
+ASTNode *parseDeclaracionConstante(void);
+ASTNode *parseAsignacion(void);
+ASTNode *parseMostrarStmt(void);
+ASTNode *parseLeerStmt(void);
+ASTNode *parseSentenciaCondicional(void);
+ASTNode *parseSentenciaBucleMientras(void);
+ASTNode *parseSentenciaBuclePara(void);
+ASTNode *parseBloqueSentencias(void);
+ASTNode *parseSentencia(void);
+ASTNode *parseExpresion(void);
+ASTNode *parseExpresionOR(void);
+ASTNode *parseExpresionAND(void);
+ASTNode *parseExpresionNOT(void);
+ASTNode *parseExpresionComparacion(void);
+ASTNode *parseExpresionAritmetica(void);
+ASTNode *parseTermino(void);
+ASTNode *parseFactor(void);
 
 ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna);
 void liberar_ast(ASTNode *node);

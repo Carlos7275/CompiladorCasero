@@ -3,33 +3,33 @@
 
 enum TipoToken
 {
-    PalRes,   // 0
-    ID,       // 1
-    NUM,      // 2
-    SIM,      // 3
-    OPAR,     // 4
-    OPCOMP,   // 5
-    OPASIGN,  // 6
-    OPLOG,    // 7
-    ESPECIAL, // 8
+    PalRes,
+    ID,
+    NUM,
+    SIM,
+    OPAR,
+    OPCOMP,
+    OPASIGN,
+    OPLOG,
+    ESPECIAL,
     UNARIO,
-    CAD,       // 9
-    SEPARADOR, // 10
+    CAD,
+    SEPARADOR,
     T_ROMPER,
     T_CONTINUAR,
-    DESCONOCIDO // 11
+    DESCONOCIDO
 };
 
 enum TipoDato
 {
-    INT,    // 0
-    STRING, // 1
-    CHAR,   // 2
-    FLOAT,  // 3
+    INT,
+    STRING,
+    CHAR,
+    FLOAT,
     BOOL,
     TIPO_VOID,
     TIPO_ERROR,
-    OTRO // 4
+    OTRO
 };
 
 struct Token
@@ -44,7 +44,6 @@ struct Token
     enum TipoDato tipoDato;
 };
 
-// Estructura del nodo
 struct nodo
 {
     struct Token info;

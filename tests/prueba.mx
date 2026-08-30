@@ -1,0 +1,152 @@
+// ========================================
+// PRUEBA INTEGRAL DEL COMPILADOR CASERO
+// Verifica todas las características del lenguaje
+// ========================================
+
+Mostrar("====================================\n");
+Mostrar("PRUEBA DEL COMPILADOR CASERO v1.0.0\n");
+Mostrar("====================================\n\n");
+
+// --- Prueba 1: Variables enteras ---
+Mostrar("1. Probando variables enteras:\n");
+Entero numero_entero = 42;
+Mostrar("   Valor: ", numero_entero, "\n\n");
+
+// --- Prueba 2: Operaciones aritméticas ---
+Mostrar("2. Probando operaciones aritmeticas:\n");
+Entero a = 10;
+Entero b = 3;
+Entero suma = a + b;
+Entero resta = a - b;
+Entero mult = a * b;
+
+Mostrar("   ", a, " + ", b, " = ", suma, "\n");
+Mostrar("   ", a, " - ", b, " = ", resta, "\n");
+Mostrar("   ", a, " * ", b, " = ", mult, "\n\n");
+
+// --- Prueba 3: Condicionales Si/Sino ---
+Mostrar("3. Probando condicionales Si/Sino:\n");
+Entero x = 15;
+
+Si(x > 10){
+    Mostrar("   x es mayor que 10\n");
+}
+Sino{
+    Mostrar("   x es menor o igual a 10\n");
+}
+
+Si(x < 20){
+    Mostrar("   x es menor que 20\n");
+}
+
+Mostrar("\n");
+
+// --- Prueba 4: Bucle Para ---
+Mostrar("4. Probando bucle Para (1 al 5):\n");
+Mostrar("   ");
+Entero i = 0;
+Para(i = 1; i <= 5; i = i + 1){
+    Mostrar(i, " ");
+}
+Mostrar("\n\n");
+
+// --- Prueba 5: Bucle Mientras ---
+Mostrar("5. Probando bucle Mientras (cuenta regresiva):\n");
+Entero contador = 3;
+
+Mientras(contador > 0){
+    Mostrar("   ", contador, "\n");
+    contador = contador - 1;
+}
+
+Mostrar("   Liftoff!\n\n");
+
+// --- Prueba 6: Operadores de comparación ---
+Mostrar("6. Probando operadores de comparacion:\n");
+Entero p = 5;
+Entero q = 5;
+Entero r = 10;
+
+Si(p == q){
+    Mostrar("   5 == 5 es verdadero\n");
+}
+
+Si(p != r){
+    Mostrar("   5 != 10 es verdadero\n");
+}
+
+Si(p < r){
+    Mostrar("   5 < 10 es verdadero\n");
+}
+
+Si(r > p){
+    Mostrar("   10 > 5 es verdadero\n");
+}
+
+Mostrar("\n");
+
+// --- Prueba 7: Suma acumulada ---
+Mostrar("7. Probando suma acumulada (1 a 10):\n");
+Entero acum = 0;
+Entero j = 0;
+
+Para(j = 1; j <= 10; j = j + 1){
+    acum = acum + j;
+}
+
+Mostrar("   Suma: ", acum, "\n\n");
+
+// --- Prueba 8: Factorial de 5 ---
+Mostrar("8. Probando factorial de 5:\n");
+Entero n = 5;
+Entero fact = 1;
+Entero k = 0;
+
+Para(k = 1; k <= n; k = k + 1){
+    fact = fact * k;
+}
+
+Mostrar("   5! = ", fact, "\n\n");
+
+// --- Prueba 9: Números pares ---
+Mostrar("9. Identificando pares del 1 al 10:\n");
+Mostrar("   Pares: ");
+Entero m = 0;
+Entero residuo = 0;
+
+Para(m = 1; m <= 10; m = m + 1){
+    residuo = m - (m / 2) * 2;
+    Si(residuo == 0){
+        Mostrar(m, " ");
+    }
+}
+
+Mostrar("\n\n");
+
+// --- Prueba 10: Anidación de condicionales ---
+Mostrar("10. Condicionales anidados:\n");
+Entero edad = 25;
+
+Si(edad >= 18){
+    Mostrar("    Mayor de edad\n");
+    Si(edad >= 65){
+        Mostrar("    Adulto mayor\n");
+    }
+    Sino Si(edad >= 30){
+        Mostrar("    Adulto\n");
+    }
+    Sino{
+        Mostrar("    Joven adulto\n");
+    }
+}
+Sino{
+    Mostrar("    Menor de edad\n");
+}
+
+Mostrar("\n");
+
+// --- Resumen final ---
+Mostrar("====================================\n");
+Mostrar("PRUEBA COMPLETADA EXITOSAMENTE!\n");
+Mostrar("====================================\n");
+Mostrar("El compilador funciona correctamente.\n");

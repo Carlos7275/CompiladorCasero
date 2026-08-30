@@ -6,13 +6,21 @@
 
 const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante"};
 
+/**
+ * Reconoce un identificador o palabra reservada.
+ *
+ * @param archivo Flujo de entrada.
+ * @param car_inicial Primer carácter del identificador.
+ * @param Col Columna inicial.
+ * @param Renglon Número de línea.
+ */
 void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
     char lexema[100];
     int i = 0;
-    lexema[i++] = car_inicial; // El primer carácter ya fue validado como 'alpha' por AnalizarArchivo
+    lexema[i++] = car_inicial;
 
-    int car_siguiente; // Usamos un nombre diferente para evitar confusiones con 'car' inicial
+    int car_siguiente;
 
     while ((car_siguiente = fgetc(archivo)) != EOF && i < sizeof(lexema) - 1)
     {
@@ -35,15 +43,22 @@ void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
     generarToken(token_type, lexema, data_type, Col, Renglon);
 }
 
+/**
+ * Reconoce una cadena literal delimitada por comillas dobles.
+ *
+ * @param archivo Flujo de entrada.
+ * @param car Primer carácter de la cadena.
+ * @param Col Columna inicial.
+ * @param Renglon Número de línea.
+ */
 void EsCadena(FILE *archivo, char car, int Col, int Renglon)
 {
     char lexema[1000];
     int i = 0;
 
-    // Guardamos la primera comilla
     lexema[i++] = car;
 
-    int FlagError = 1; // Bandera para detectar cadena no cerrada
+    int FlagError = 1;
 
     while ((car = fgetc(archivo)) != EOF && i < (int)(sizeof(lexema) - 1))
     {
@@ -59,7 +74,7 @@ void EsCadena(FILE *archivo, char car, int Col, int Renglon)
         }
     }
 
-    lexema[i] = '\0'; // Terminar cadena
+    lexema[i] = '\0';
 
     if (FlagError == 0)
     {
@@ -72,16 +87,23 @@ void EsCadena(FILE *archivo, char car, int Col, int Renglon)
     }
 }
 
+/**
+ * Reconoce un literal numérico entero o flotante.
+ *
+ * @param arch Flujo de entrada.
+ * @param car_inicial Primer dígito del número.
+ * @param Col Columna inicial.
+ * @param Renglon Número de línea.
+ */
 void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
 {
     char lexema[100] = {0};
     int i = 0;
     int cantPuntos = 0;
 
-    // Guardamos el primer caracter
     lexema[i++] = car_inicial;
 
-    char next_char; // Para el carácter leído del flujo
+    char next_char;
 
     while (i < (int)(sizeof(lexema) - 1))
     {
@@ -160,15 +182,23 @@ enum TipoDato EsPalabraReservadaConTipo(const char *lexema, enum TipoToken *out_
     return OTRO;
 }
 
+/**
+ * Reconoce operadores y símbolos especiales del lenguaje.
+ *
+ * @param archivo Flujo de entrada.
+ * @param car_inicial Símbolo actual.
+ * @param Col Columna inicial.
+ * @param Renglon Número de línea.
+ */
 void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
-    char lexema[100]; // Usamos un array más grande por si es un símbolo doble
+    char lexema[100];
     int i = 0;
-    lexema[i++] = car_inicial; // El primer carácter ya se añade al lexema
+    lexema[i++] = car_inicial;
 
-    int next_char_val; // Para mirar el siguiente carácter
+    int next_char_val;
 
-    switch (car_inicial) // Usamos car_inicial porque es el que ya tenemos
+    switch (car_inicial)
     {
     case '+':
         next_char_val = fgetc(archivo); // Mira el siguiente carácter

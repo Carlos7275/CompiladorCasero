@@ -1,0 +1,18 @@
+// Ejemplo: Calculo de area de un rectangulo
+
+Entero base = 0;
+Entero altura = 0;
+Entero area = 0;
+
+Mostrar("Calculo del Area de un Rectangulo\n");
+Mostrar("Ingrese la base:\n");
+Leer(base);
+
+Mostrar("Ingrese la altura:\n");
+Leer(altura);
+
+area = base * altura;
+
+Mostrar("Base: ", base, "\n");
+Mostrar("Altura: ", altura, "\n");
+Mostrar("Area: ", area, "\n");

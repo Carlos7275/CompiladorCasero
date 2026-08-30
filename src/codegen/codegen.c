@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "parser.h"
 #include "symbols.h"
@@ -36,7 +37,7 @@ static void push_loop_labels(char *break_label, char *continue_label)
     continue_labels_stack[loop_stack_top] = continue_label;
 }
 
-static void pop_loop_labels()
+static void pop_loop_labels(void)
 {
     if (loop_stack_top < 0)
     {
@@ -48,7 +49,7 @@ static void pop_loop_labels()
     loop_stack_top--;
 }
 
-static char *get_current_break_label()
+static char *get_current_break_label(void)
 {
     if (loop_stack_top < 0)
     {
@@ -58,7 +59,7 @@ static char *get_current_break_label()
     return break_labels_stack[loop_stack_top];
 }
 
-static char *get_current_continue_label()
+static char *get_current_continue_label(void)
 {
     if (loop_stack_top < 0)
     {
@@ -75,6 +76,13 @@ static void generate_code_for_declaration(ASTNode *decl_node);
 static void generate_code_for_if_statement(ASTNode *if_node);
 static void generate_code_for_while_statement(ASTNode *while_node);
 static void generate_code_for_for_statement(ASTNode *for_node);
+static int es_entero(const char *s);
+static int es_flotante(const char *s);
+static int usar_temp(const char *temp, int desde);
+int es_literal(const char *s);
+int is_number(const char *s);
+int is_string_literal(const char *s);
+int is_valid_varname(const char *s);
 
 void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym_table)
 {
@@ -92,7 +100,10 @@ void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym
     emit_quad(IR_HALT, NULL, NULL, NULL);
 }
 
-void init_ir_generator()
+/**
+ * Inicializa la estructura del generador de código intermedio.
+ */
+void init_ir_generator(void)
 {
     ir_capacity = INITIAL_IR_CAPACITY;
 
@@ -108,6 +119,14 @@ void init_ir_generator()
     next_label_number = 0;
 }
 
+/**
+ * Agrega una cuádrupla al buffer del IR.
+ *
+ * @param op Operación a registrar.
+ * @param arg1 Primer operando.
+ * @param arg2 Segundo operando.
+ * @param result Destino o resultado de la operación.
+ */
 void emit_quad(IROperation op, const char *arg1, const char *arg2, const char *result)
 {
     if (ir_current_size >= ir_capacity)
@@ -130,7 +149,10 @@ void emit_quad(IROperation op, const char *arg1, const char *arg2, const char *r
     ir_current_size++;
 }
 
-void free_ir_code()
+/**
+ * Libera la memoria del código intermedio generado.
+ */
+void free_ir_code(void)
 {
     if (ir_code == NULL)
         return;
@@ -151,14 +173,24 @@ void free_ir_code()
     ir_capacity = 0;
 }
 
-char *new_temp()
+/**
+ * Crea un nombre temporal único para un valor intermedio.
+ *
+ * @return Nombre temporal asignado.
+ */
+char *new_temp(void)
 {
     static char temp_name_buffer[32];
     sprintf(temp_name_buffer, "t%d", next_temp_number++);
     return strdup(temp_name_buffer);
 }
 
-char *new_label()
+/**
+ * Genera una etiqueta única para saltos y bifurcaciones del IR.
+ *
+ * @return Nombre de etiqueta generado.
+ */
+char *new_label(void)
 {
     static char label_name_buffer[32];
     sprintf(label_name_buffer, "L%d", next_label_number++);
@@ -177,6 +209,7 @@ static void generate_code_for_node(ASTNode *node)
     case AST_PROGRAMA:
     case AST_LISTA_SENTENCIAS:
     case AST_BLOQUE:
+    {
         TablaSimbolos *ambito_anterior = ambito_actual;
 
         if (ambito_actual->num_hijos > 0)
@@ -196,6 +229,7 @@ static void generate_code_for_node(ASTNode *node)
 
         ambito_actual = ambito_anterior;
         break;
+    }
 
     case AST_DECLARACION_VAR:
     case AST_DECLARACION_CONST:
@@ -624,17 +658,17 @@ static void generate_code_for_for_statement(ASTNode *for_node)
     pop_loop_labels();
 }
 
-Quadruple *get_ir_code()
+Quadruple *get_ir_code(void)
 {
     return ir_code;
 }
 
-int get_ir_code_size()
+int get_ir_code_size(void)
 {
     return ir_current_size;
 }
 
-void imprimir_codigo_intermedio()
+void imprimir_codigo_intermedio(void)
 {
     printf("\n--- Código Intermedio (Cuádruplos) ---\n");
     for (int i = 0; i < ir_current_size; i++)
@@ -774,88 +808,139 @@ int es_literal(const char *s)
     strtod(s, &endptr);
     return *endptr == '\0';
 }
-void optimize_ir_code()
+static int es_temporal(const char *s)
+{
+    return s && s[0] == 't' && s[1] != '\0';
+}
+
+static void sustituir_uso_temporal(char *dst, const char *src)
 {
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
-
-        if (q->arg1 && q->arg2 && q->result &&
-            es_literal(q->arg1) && es_literal(q->arg2))
+        if (q->arg1 && strcmp(q->arg1, dst) == 0)
         {
-            double a = atof(q->arg1);
-            double b = atof(q->arg2);
-            double r;
-            int valido = 1;
-
-            switch (q->op)
-            {
-            case IR_ADD:
-                r = a + b;
-                break;
-            case IR_SUB:
-                r = a - b;
-                break;
-            case IR_MUL:
-                r = a * b;
-                break;
-            case IR_DIV:
-                if (b != 0)
-                    r = a / b;
-                else
-                    valido = 0;
-                break;
-            case IR_MOD:
-                if ((int)b != 0)
-                    r = (int)a % (int)b;
-                else
-                    valido = 0;
-                break;
-            default:
-                valido = 0;
-                break;
-            }
-
-            if (valido)
-            {
-                char buffer[64];
-                if (r == (int)r)
-                    sprintf(buffer, "%d", (int)r);
-                else
-                    sprintf(buffer, "%f", r);
-
-                q->op = IR_ASSIGN;
-                free(q->arg1);
-                free(q->arg2);
-                q->arg1 = strdup(buffer);
-                q->arg2 = NULL;
-            }
+            free(q->arg1);
+            q->arg1 = strdup(src);
         }
-
-        if (q->op == IR_ASSIGN && q->arg1 && q->result && q->result[0] == 't')
+        if (q->arg2 && strcmp(q->arg2, dst) == 0)
         {
-            const char *src = q->arg1;
-            const char *dest = q->result;
+            free(q->arg2);
+            q->arg2 = strdup(src);
+        }
+    }
+}
 
-            for (int j = i + 1; j < ir_current_size; j++)
+void optimize_ir_code(void)
+{
+    int cambio = 1;
+    while (cambio)
+    {
+        cambio = 0;
+
+        for (int i = 0; i < ir_current_size; i++)
+        {
+            Quadruple *q = &ir_code[i];
+
+            if (q->arg1 && q->arg2 && q->result &&
+                es_literal(q->arg1) && es_literal(q->arg2))
             {
-                Quadruple *q2 = &ir_code[j];
+                double a = atof(q->arg1);
+                double b = atof(q->arg2);
+                double r;
+                int valido = 1;
 
-                if (q2->arg1 && strcmp(q2->arg1, dest) == 0)
+                switch (q->op)
                 {
-                    free(q2->arg1);
-                    q2->arg1 = strdup(src);
-                }
-                if (q2->arg2 && strcmp(q2->arg2, dest) == 0)
-                {
-                    free(q2->arg2);
-                    q2->arg2 = strdup(src);
-                }
-
-                if (q2->result && strcmp(q2->result, dest) == 0)
+                case IR_ADD:
+                    r = a + b;
                     break;
+                case IR_SUB:
+                    r = a - b;
+                    break;
+                case IR_MUL:
+                    r = a * b;
+                    break;
+                case IR_DIV:
+                    if (b != 0.0)
+                        r = a / b;
+                    else
+                        valido = 0;
+                    break;
+                case IR_MOD:
+                    if (b != 0.0)
+                        r = (double)((long long)a % (long long)b);
+                    else
+                        valido = 0;
+                    break;
+                default:
+                    valido = 0;
+                    break;
+                }
+
+                if (valido)
+                {
+                    char buffer[64];
+                    if (fabs(r - round(r)) < 1e-9)
+                        snprintf(buffer, sizeof(buffer), "%lld", (long long)llround(r));
+                    else
+                        snprintf(buffer, sizeof(buffer), "%0.10f", r);
+
+                    q->op = IR_ASSIGN;
+                    free(q->arg1);
+                    free(q->arg2);
+                    q->arg1 = strdup(buffer);
+                    q->arg2 = NULL;
+                    cambio = 1;
+                }
+            }
+
+            if (q->op == IR_ASSIGN && q->arg1 && q->result && es_temporal(q->result))
+            {
+                const char *src = q->arg1;
+                int usado = 0;
+
+                for (int j = i + 1; j < ir_current_size; j++)
+                {
+                    Quadruple *q2 = &ir_code[j];
+                    if ((q2->arg1 && strcmp(q2->arg1, q->result) == 0) ||
+                        (q2->arg2 && strcmp(q2->arg2, q->result) == 0) ||
+                        (q2->result && strcmp(q2->result, q->result) == 0))
+                    {
+                        usado = 1;
+                        break;
+                    }
+                }
+
+                if (!usado)
+                {
+                    free(q->result);
+                    q->result = NULL;
+                    q->op = -1;
+                    cambio = 1;
+                    continue;
+                }
+
+                if (es_temporal(src) || is_valid_varname(src) || is_number(src) || is_string_literal(src) || es_literal(src))
+                {
+                    sustituir_uso_temporal(q->result, src);
+                    q->op = -1;
+                    cambio = 1;
+                }
             }
         }
+
+        int nueva_pos = 0;
+        for (int i = 0; i < ir_current_size; i++)
+        {
+            if (ir_code[i].op != (IROperation)-1)
+            {
+                if (i != nueva_pos)
+                    ir_code[nueva_pos] = ir_code[i];
+                nueva_pos++;
+            }
+        }
+        ir_current_size = nueva_pos;
     }
 
     for (int i = 0; i < ir_current_size; i++)
@@ -877,7 +962,7 @@ void optimize_ir_code()
     int nueva_pos = 0;
     for (int i = 0; i < ir_current_size; i++)
     {
-        if (ir_code[i].op != -1)
+        if (ir_code[i].op != (IROperation)-1)
         {
             if (i != nueva_pos)
                 ir_code[nueva_pos] = ir_code[i];
@@ -1070,9 +1155,24 @@ void generate_asm(FILE *f)
 {
     char declared_vars[MAX_BUFFER][64];
     int declared_vars_count = 0;
+    const char *data_section = "section .data\n";
+    const char *bss_section = "section .bss\n";
+    const char *text_section = "section .text\n";
+    const char *printf_sym = "printf";
+    const char *scanf_sym = "scanf";
+    const char *main_sym = "main";
+
+#if defined(__APPLE__)
+    data_section = "section __DATA,__data\n";
+    bss_section = "section __DATA,__bss\n";
+    text_section = "section __TEXT,__text\n";
+    printf_sym = "_printf";
+    scanf_sym = "_scanf";
+    main_sym = "_main";
+#endif
 
     // Sección .data con formatos
-    fprintf(f, "section .data\n");
+    fprintf(f, "%s", data_section);
     fprintf(f, "fmt_int db \"%%ld\", 0\n");
     fprintf(f, "fmt_float db \"%%lf\", 10, 0\n");
     fprintf(f, "fmt_str db \"%%s\", 0\n");
@@ -1080,20 +1180,27 @@ void generate_asm(FILE *f)
     fprintf(f, "fmt_read_float db \"%%lf\", 0\n");
     fprintf(f, "fmt_read_str db \"%%255s\", 0\n");
 
-    // Literales string para impresión
+    // Literales string (buscar en todas las operaciones)
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
-        if (q->op == IR_PRINT && is_string_literal(q->arg1))
+        // Buscar cadenas en arg1 y arg2
+        if (is_string_literal(q->arg1))
         {
             fprintf(f, "str_%d db ", i);
             print_asm_string_literal(f, strip_quotes(q->arg1));
             fprintf(f, ", 0\n");
         }
+        if (is_string_literal(q->arg2))
+        {
+            fprintf(f, "str_%d_2 db ", i);
+            print_asm_string_literal(f, strip_quotes(q->arg2));
+            fprintf(f, ", 0\n");
+        }
     }
 
     // Variables en .bss
-    fprintf(f, "section .bss\n");
+    fprintf(f, "%s", bss_section);
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
@@ -1117,12 +1224,12 @@ void generate_asm(FILE *f)
     }
 
     // Código principal
-    fprintf(f, "section .text\n");
-    fprintf(f, "global main\n");
-    fprintf(f, "extern printf\n");
-    fprintf(f, "extern scanf\n");
+    fprintf(f, "%s", text_section);
+    fprintf(f, "global %s\n", main_sym);
+    fprintf(f, "extern %s\n", printf_sym);
+    fprintf(f, "extern %s\n", scanf_sym);
 
-    fprintf(f, "main:\n");
+    fprintf(f, "%s:\n", main_sym);
     fprintf(f, "    push rbp\n");
     fprintf(f, "    mov rbp, rsp\n");
 
@@ -1140,9 +1247,37 @@ void generate_asm(FILE *f)
         {
         case IR_ASSIGN:
             if (is_number(q->arg1))
+            {
                 fprintf(f, "    mov rax, %s\n    mov [rel %s], rax\n", q->arg1, q->result);
+            }
+            else if (is_string_literal(q->arg1))
+            {
+                // Copiar cadena byte a byte
+                EntradaSimbolo *entry_result = buscar_simbolo(ambito_actual, q->result);
+                if (entry_result != NULL && entry_result->tipo == STRING)
+                {
+                    // Generar código para copiar la cadena
+                    fprintf(f,
+                        "    lea rsi, [rel str_%d]\n"
+                        "    lea rdi, [rel %s]\n"
+                        "    xor rcx, rcx\n"
+                        ".copy_str_%d:\n"
+                        "    lodsb\n"
+                        "    stosb\n"
+                        "    test al, al\n"
+                        "    jnz .copy_str_%d\n",
+                        i, q->result, i, i);
+                }
+                else
+                {
+                    // Si no es STRING, copiar la dirección (para compatibilidad)
+                    fprintf(f, "    lea rax, [rel str_%d]\n    mov [rel %s], rax\n", i, q->result);
+                }
+            }
             else
+            {
                 fprintf(f, "    mov rax, [rel %s]\n    mov [rel %s], rax\n", q->arg1, q->result);
+            }
             break;
 
         case IR_ADD:
@@ -1263,107 +1398,105 @@ void generate_asm(FILE *f)
         {
             EntradaSimbolo *entry = buscar_simbolo(ambito_actual, q->arg1);
 
-            fprintf(f,
-                "    %%ifdef WINDOWS\n"
-                "        "); 
+#if defined(_WIN32)
             if (is_string_literal(q->arg1))
             {
                 fprintf(f,
-                    "lea rcx, [rel fmt_str]\n"
-                    "        lea rdx, [rel str_%d]\n"
-                    "        xor eax, eax\n"
-                    "        call printf\n",
-                    i);
+                    "    lea rcx, [rel fmt_str]\n"
+                    "    lea rdx, [rel str_%d]\n"
+                    "    xor eax, eax\n"
+                    "    call %s\n",
+                    i, printf_sym);
             }
             else if (is_number(q->arg1))
             {
                 fprintf(f,
-                    "lea rcx, [rel fmt_int]\n"
-                    "        mov rdx, %s\n"
-                    "        xor eax, eax\n"
-                    "        call printf\n",
-                    q->arg1);
+                    "    lea rcx, [rel fmt_int]\n"
+                    "    mov rdx, %s\n"
+                    "    xor eax, eax\n"
+                    "    call %s\n",
+                    q->arg1, printf_sym);
             }
             else if (entry != NULL)
             {
                 if (entry->tipo == STRING)
                 {
                     fprintf(f,
-                        "lea rcx, [rel fmt_str]\n"
-                        "        lea rdx, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call printf\n",
-                        q->arg1);
+                        "    lea rcx, [rel fmt_str]\n"
+                        "    lea rdx, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->arg1, printf_sym);
                 }
                 else if (entry->tipo == FLOAT)
                 {
                     fprintf(f,
-                        "lea rcx, [rel fmt_float]\n"
-                        "        movsd xmm0, qword [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call printf\n",
-                        q->arg1);
+                        "    lea rcx, [rel fmt_float]\n"
+                        "    movsd xmm0, qword [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->arg1, printf_sym);
                 }
                 else
                 {
                     fprintf(f,
-                        "lea rcx, [rel fmt_int]\n"
-                        "        mov rdx, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call printf\n",
-                        q->arg1);
+                        "    lea rcx, [rel fmt_int]\n"
+                        "    mov rdx, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->arg1, printf_sym);
                 }
             }
-            fprintf(f, "    %%else\n        ");
+#else
             if (is_string_literal(q->arg1))
             {
                 fprintf(f,
-                    "lea rdi, [rel str_%d]\n"
-                    "        lea rsi, [rel fmt_str]\n"
-                    "        xor eax, eax\n"
-                    "        call printf\n",
-                    i);
+                    "    lea rdi, [rel str_%d]\n"
+                    "    lea rsi, [rel fmt_str]\n"
+                    "    xor eax, eax\n"
+                    "    call %s\n",
+                    i, printf_sym);
             }
             else if (is_number(q->arg1))
             {
                 fprintf(f,
-                    "mov rsi, %s\n"
-                    "        lea rdi, [rel fmt_int]\n"
-                    "        xor eax, eax\n"
-                    "        call printf\n",
-                    q->arg1);
+                    "    mov rsi, %s\n"
+                    "    lea rdi, [rel fmt_int]\n"
+                    "    xor eax, eax\n"
+                    "    call %s\n",
+                    q->arg1, printf_sym);
             }
             else if (entry != NULL)
             {
                 if (entry->tipo == STRING)
                 {
                     fprintf(f,
-                        "lea rdi, [rel %s]\n"
-                        "        lea rsi, [rel fmt_str]\n"
-                        "        xor eax, eax\n"
-                        "        call printf\n",
-                        q->arg1);
+                        "    lea rdi, [rel %s]\n"
+                        "    lea rsi, [rel fmt_str]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->arg1, printf_sym);
                 }
                 else if (entry->tipo == FLOAT)
                 {
                     fprintf(f,
-                        "movsd xmm0, qword [rel %s]\n"
-                        "        lea rdi, [rel fmt_float]\n"
-                        "        mov eax, 1\n"
-                        "        call printf\n",
-                        q->arg1);
+                        "    movsd xmm0, qword [rel %s]\n"
+                        "    lea rdi, [rel fmt_float]\n"
+                        "    mov eax, 1\n"
+                        "    call %s\n",
+                        q->arg1, printf_sym);
                 }
                 else
                 {
                     fprintf(f,
-                        "mov rsi, [rel %s]\n"
-                        "        lea rdi, [rel fmt_int]\n"
-                        "        xor eax, eax\n"
-                        "        call printf\n",
-                        q->arg1);
+                        "    mov rsi, [rel %s]\n"
+                        "    lea rdi, [rel fmt_int]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->arg1, printf_sym);
                 }
             }
-            fprintf(f, "    %%endif\n");
+#endif
             break;
         }
 
@@ -1371,72 +1504,69 @@ void generate_asm(FILE *f)
         {
             EntradaSimbolo *entry = buscar_simbolo(ambito_actual, q->result);
 
-            fprintf(f,
-                "    %%ifdef WINDOWS\n"
-                "        ");
+#if defined(_WIN32)
             if (entry != NULL)
             {
                 if (entry->tipo == STRING)
                 {
                     fprintf(f,
-                        "lea rcx, [rel fmt_read_str]\n"
-                        "        lea rdx, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call scanf\n",
-                        q->result);
+                        "    lea rcx, [rel fmt_read_str]\n"
+                        "    lea rdx, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->result, scanf_sym);
                 }
                 else if (entry->tipo == FLOAT)
                 {
                     fprintf(f,
-                        "lea rcx, [rel fmt_read_float]\n"
-                        "        lea rdx, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call scanf\n",
-                        q->result);
+                        "    lea rcx, [rel fmt_read_float]\n"
+                        "    lea rdx, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->result, scanf_sym);
                 }
                 else
                 {
                     fprintf(f,
-                        "lea rcx, [rel fmt_read_int]\n"
-                        "        lea rdx, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call scanf\n",
-                        q->result);
+                        "    lea rcx, [rel fmt_read_int]\n"
+                        "    lea rdx, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->result, scanf_sym);
                 }
             }
-            fprintf(f,
-                "    %%else\n        ");
+#else
             if (entry != NULL)
             {
                 if (entry->tipo == STRING)
                 {
                     fprintf(f,
-                        "lea rdi, [rel fmt_read_str]\n"
-                        "        lea rsi, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call scanf\n",
-                        q->result);
+                        "    lea rdi, [rel fmt_read_str]\n"
+                        "    lea rsi, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->result, scanf_sym);
                 }
                 else if (entry->tipo == FLOAT)
                 {
                     fprintf(f,
-                        "lea rdi, [rel fmt_read_float]\n"
-                        "        lea rsi, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call scanf\n",
-                        q->result);
+                        "    lea rdi, [rel fmt_read_float]\n"
+                        "    lea rsi, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->result, scanf_sym);
                 }
                 else
                 {
                     fprintf(f,
-                        "lea rdi, [rel fmt_read_int]\n"
-                        "        lea rsi, [rel %s]\n"
-                        "        xor eax, eax\n"
-                        "        call scanf\n",
-                        q->result);
+                        "    lea rdi, [rel fmt_read_int]\n"
+                        "    lea rsi, [rel %s]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n",
+                        q->result, scanf_sym);
                 }
             }
-            fprintf(f, "    %%endif\n");
+#endif
             break;
         }
 
@@ -1475,13 +1605,15 @@ void generate_asm(FILE *f)
 
     fprintf(f, "    pop rbp\n");
 
-    fprintf(f, "%%ifdef WINDOWS\n");
+#if defined(_WIN32)
     fprintf(f, "    extern ExitProcess\n");
     fprintf(f, "    mov ecx, 0\n");
     fprintf(f, "    call ExitProcess\n");
-    fprintf(f, "%%else\n");
+#else
     fprintf(f, "    ret\n");
-    fprintf(f, "%%endif\n");
+#endif
 
+#if !defined(__APPLE__)
     fprintf(f, "section .note.GNU-stack noalloc noexec nowrite progbits\n");
+#endif
 }

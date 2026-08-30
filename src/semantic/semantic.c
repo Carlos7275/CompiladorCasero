@@ -15,6 +15,13 @@ int profundidad_loop = 0;
 
 int contador_errores_semanticos = 0;
 
+/**
+ * Registra un error semántico con información de ubicación y mensaje formateado.
+ *
+ * @param renglon Línea donde ocurrió el problema.
+ * @param columna Columna donde ocurrió el problema.
+ * @param formato Texto del mensaje con formato printf.
+ */
 void reportar_error_semantico(int renglon, int columna, const char *formato, ...)
 {
     struct ErrorSemantico *nuevo_error = (struct ErrorSemantico *)malloc(sizeof(struct ErrorSemantico));
@@ -37,6 +44,9 @@ void reportar_error_semantico(int renglon, int columna, const char *formato, ...
     contador_errores_semanticos++;
 }
 
+/**
+ * Muestra los errores semánticos ordenados por posición en el archivo fuente.
+ */
 void imprimir_errores_semanticos()
 {
     if (cabeza_errores == NULL)
@@ -120,6 +130,12 @@ void imprimir_errores_semanticos()
     cabeza_errores = NULL;
 }
 
+/**
+ * Convierte un valor del enumerador de tipos a una cadena legible.
+ *
+ * @param tipo Tipo de dato a convertir.
+ * @return Nombre textual del tipo.
+ */
 const char *tipoDatoToString(enum TipoDato tipo)
 {
     switch (tipo)
@@ -143,6 +159,14 @@ const char *tipoDatoToString(enum TipoDato tipo)
     }
 }
 
+/**
+ * Valida si una asignación es compatible entre tipos.
+ *
+ * @param renglon Línea de la asignación.
+ * @param columna Columna de la asignación.
+ * @param tipo_destino Tipo del destino.
+ * @param tipo_origen Tipo del valor asignado.
+ */
 void verificar_asignacion(int renglon, int columna, enum TipoDato tipo_destino, enum TipoDato tipo_origen)
 {
     if (tipo_destino == TIPO_ERROR || tipo_origen == TIPO_ERROR)
@@ -170,6 +194,15 @@ void verificar_asignacion(int renglon, int columna, enum TipoDato tipo_destino, 
                              tipoDatoToString(tipo_origen), tipoDatoToString(tipo_destino));
 }
 
+/**
+ * Valida y devuelve el tipo resultante de una operación aritmética.
+ *
+ * @param renglon Línea del operador.
+ * @param columna Columna del operador.
+ * @param tipo1 Primer operando.
+ * @param tipo2 Segundo operando.
+ * @return Tipo del resultado o TIPO_ERROR si la operación es inválida.
+ */
 enum TipoDato verificar_expresion_aritmetica(int renglon, int columna, enum TipoDato tipo1, enum TipoDato tipo2)
 {
     if (tipo1 == TIPO_ERROR || tipo2 == TIPO_ERROR)
@@ -201,6 +234,15 @@ enum TipoDato verificar_expresion_aritmetica(int renglon, int columna, enum Tipo
     return TIPO_ERROR;
 }
 
+/**
+ * Valida y devuelve el tipo del resultado de una comparación.
+ *
+ * @param renglon Línea del operador de comparación.
+ * @param columna Columna del operador de comparación.
+ * @param tipo1 Primer operando.
+ * @param tipo2 Segundo operando.
+ * @return Tipo booleano si la comparación es válida, o TIPO_ERROR en caso contrario.
+ */
 enum TipoDato verificar_expresion_comparacion(int renglon, int columna, enum TipoDato tipo1, enum TipoDato tipo2)
 {
     if (tipo1 == TIPO_ERROR || tipo2 == TIPO_ERROR)

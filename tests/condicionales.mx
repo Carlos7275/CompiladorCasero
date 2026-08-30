@@ -1,0 +1,24 @@
+// Ejemplo: Sistema de calificaciones con condicionales
+
+Entero calificacion = 0;
+
+Mostrar("Ingrese su calificacion (0-100):\n");
+Leer(calificacion);
+
+Si(calificacion >= 90){
+    Mostrar("Excelente! Aprobado con distincion.\n");
+}
+Sino Si(calificacion >= 80){
+    Mostrar("Muy bien! Aprobado.\n");
+}
+Sino Si(calificacion >= 70){
+    Mostrar("Bien! Aprobado.\n");
+}
+Sino Si(calificacion >= 60){
+    Mostrar("Pasable. Aprobado.\n");
+}
+Sino{
+    Mostrar("Reprobado. Debe intentarlo nuevamente.\n");
+}
+
+Mostrar("Su calificacion fue: ", calificacion, "\n");

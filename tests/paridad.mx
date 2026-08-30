@@ -1,0 +1,17 @@
+// Ejemplo: Numeros pares e impares
+
+Entero numero = 0;
+Entero residuo = 0;
+
+Mostrar("Programa para verificar si un numero es par o impar.\n");
+Mostrar("Ingrese un numero:\n");
+Leer(numero);
+
+residuo = numero - (numero / 2) * 2;
+
+Si(residuo == 0){
+    Mostrar("El numero ", numero, " es PAR.\n");
+}
+Sino{
+    Mostrar("El numero ", numero, " es IMPAR.\n");
+}

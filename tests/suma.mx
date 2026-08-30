@@ -1,0 +1,13 @@
+// Ejemplo: Suma de numeros del 1 al N
+
+Entero suma = 0;
+Entero n = 0;
+
+Mostrar("Ingrese un numero:\n");
+Leer(n);
+
+Para(Entero i = 1; i <= n; i++){
+    suma = suma + i;
+}
+
+Mostrar("La suma del 1 al ", n, " es: ", suma, "\n");

@@ -1,0 +1,20 @@
+// Ejemplo: Sucesion de Fibonacci
+
+Entero n = 0;
+Entero a = 0;
+Entero b = 1;
+Entero c = 0;
+
+Mostrar("Ingrese el numero de terminos de Fibonacci:\n");
+Leer(n);
+
+Mostrar("Serie de Fibonacci:\n");
+
+Para(Entero i = 1; i <= n; i++){
+    Mostrar(a, " ");
+    c = a + b;
+    a = b;
+    b = c;
+}
+
+Mostrar("\n");

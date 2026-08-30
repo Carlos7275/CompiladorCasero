@@ -5,7 +5,12 @@
 #include <ctype.h>
 int Renglon = 1, Col = 0;
 
-// Lee un archivo en modo lectura y lo regresa
+/**
+ * Abre un archivo fuente en modo lectura.
+ *
+ * @param archivo Ruta del archivo a abrir.
+ * @return Puntero al flujo de archivo abierto, o NULL si falla.
+ */
 FILE *leer_archivo(const char *archivo)
 {
     return fopen(archivo, "r");

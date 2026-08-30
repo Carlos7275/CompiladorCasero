@@ -1,0 +1,24 @@
+// Ejemplo: Juego de adivinanza simple
+
+Entero numero_secreto = 42;
+Entero intento = 0;
+Entero intentos = 0;
+
+Mostrar("Bienvenido al juego de adivinanza!\n");
+Mostrar("Adivina un numero entre 1 y 100.\n");
+
+Mientras(intento != numero_secreto){
+    Mostrar("Ingresa tu intento:\n");
+    Leer(intento);
+    intentos = intentos + 1;
+    
+    Si(intento < numero_secreto){
+        Mostrar("El numero es mayor.\n");
+    }
+    Sino Si(intento > numero_secreto){
+        Mostrar("El numero es menor.\n");
+    }
+    Sino{
+        Mostrar("Correcto! Adivinaste en ", intentos, " intentos.\n");
+    }
+}

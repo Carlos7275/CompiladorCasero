@@ -9,11 +9,19 @@ extern struct nodo *raiz;
 
 struct nodo *token_actual_parser;
 
+/**
+ * Inicializa el parser apuntando al primer token del flujo de entrada.
+ */
 void iniciarParser()
 {
     token_actual_parser = raiz;
 }
 
+/**
+ * Devuelve el token actual sin consumirlo.
+ *
+ * @return Token visible actual o NULL si no hay más elementos.
+ */
 struct Token *peekToken()
 {
     if (token_actual_parser != NULL)
@@ -23,6 +31,11 @@ struct Token *peekToken()
     return NULL;
 }
 
+/**
+ * Consume y devuelve el token actual del flujo del parser.
+ *
+ * @return Token consumido o NULL si no existe.
+ */
 struct Token *consumirToken()
 {
     if (token_actual_parser != NULL)
@@ -35,6 +48,12 @@ struct Token *consumirToken()
     return NULL;
 }
 
+/**
+ * Verifica que el siguiente token coincida con el esperado.
+ *
+ * @param tipo_esperado Tipo de token esperado.
+ * @param lexema_esperado Lexema esperado, o NULL si no se valida texto.
+ */
 void match(enum TipoToken tipo_esperado, const char *lexema_esperado)
 {
     struct Token *actual_token = peekToken();
@@ -66,6 +85,14 @@ void match(enum TipoToken tipo_esperado, const char *lexema_esperado)
     consumirToken();
 }
 
+/**
+ * Crea un nodo del árbol sintáctico con valores inicializados por defecto.
+ *
+ * @param type Tipo del nodo.
+ * @param renglon Línea donde aparece el nodo.
+ * @param columna Columna donde aparece el nodo.
+ * @return Nuevo nodo creado.
+ */
 ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
 {
     ASTNode *newNode = (ASTNode *)malloc(sizeof(ASTNode));
@@ -95,6 +122,11 @@ ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
     return newNode;
 }
 
+/**
+ * Libera recursivamente la memoria del árbol sintáctico.
+ *
+ * @param node Raíz del árbol a liberar.
+ */
 void liberar_ast(ASTNode *node)
 {
     if (node == NULL)
@@ -117,6 +149,11 @@ void liberar_ast(ASTNode *node)
     free(node);
 }
 
+/**
+ * Construye el nodo principal del programa a partir de la lista de sentencias.
+ *
+ * @return Nodo raíz del programa.
+ */
 ASTNode *parsePrograma()
 {
     iniciarParser();
@@ -125,6 +162,11 @@ ASTNode *parsePrograma()
     return programa_node;
 }
 
+/**
+ * Parsea la secuencia de sentencias y declaraciones del programa.
+ *
+ * @return Lista enlazada de nodos que representan sentencias.
+ */
 ASTNode *parseListaSentencias()
 {
     ASTNode *head = NULL;
@@ -165,6 +207,11 @@ ASTNode *parseListaSentencias()
     return head;
 }
 
+/**
+ * Detecta y parsea una sentencia o declaración del lenguaje.
+ *
+ * @return Nodo sintáctico asociado a la sentencia detectada.
+ */
 ASTNode *parseSentenciaODeclaracion()
 {
     ASTNode *node = NULL;

@@ -1,0 +1,22 @@
+// Ejemplo: Calculadora simple
+
+Entero numero1 = 0;
+Entero numero2 = 0;
+Entero suma = 0;
+Entero resta = 0;
+Entero multiplicacion = 0;
+
+Mostrar("Calculadora Simple\n");
+Mostrar("Ingrese el primer numero:\n");
+Leer(numero1);
+
+Mostrar("Ingrese el segundo numero:\n");
+Leer(numero2);
+
+suma = numero1 + numero2;
+resta = numero1 - numero2;
+multiplicacion = numero1 * numero2;
+
+Mostrar("Suma: ", numero1, " + ", numero2, " = ", suma, "\n");
+Mostrar("Resta: ", numero1, " - ", numero2, " = ", resta, "\n");
+Mostrar("Multiplicacion: ", numero1, " * ", numero2, " = ", multiplicacion, "\n");

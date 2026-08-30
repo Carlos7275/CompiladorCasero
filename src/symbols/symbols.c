@@ -6,6 +6,12 @@
 #include "semantic.h"
 
 
+/**
+ * Calcula el índice hash para una entrada de símbolo dentro del ámbito actual.
+ *
+ * @param nombre Nombre del símbolo a indexar.
+ * @return Índice de cubeta calculado.
+ */
 unsigned int calcular_hash(const char *nombre) {
     unsigned int hash = 0;
     for (int i = 0; nombre[i] != '\0'; i++) {
@@ -14,6 +20,12 @@ unsigned int calcular_hash(const char *nombre) {
     return hash % CUBETAS_TABLA_SIMBOLOS;
 }
 
+/**
+ * Crea una nueva tabla de símbolos y la registra como hijo del ámbito padre.
+ *
+ * @param padre Ámbito padre que contendrá la nueva tabla.
+ * @return Puntero a la nueva tabla creada.
+ */
 TablaSimbolos *crear_tabla_simbolos(TablaSimbolos *padre) {
     TablaSimbolos *nueva_tabla = (TablaSimbolos *)malloc(sizeof(TablaSimbolos));
     if (nueva_tabla == NULL) {
@@ -49,6 +61,11 @@ TablaSimbolos *crear_tabla_simbolos(TablaSimbolos *padre) {
 }
 
 
+/**
+ * Libera toda la jerarquía de tablas de símbolos y sus entradas asociadas.
+ *
+ * @param tabla Raíz del árbol de ámbitos a liberar.
+ */
 void destruir_jerarquia_tablas_simbolos(TablaSimbolos *tabla) {
     if (tabla == NULL) {
         return;
@@ -79,6 +96,16 @@ void destruir_jerarquia_tablas_simbolos(TablaSimbolos *tabla) {
     free(tabla);
 }
 
+/**
+ * Registra un símbolo dentro del ámbito indicado.
+ *
+ * @param tabla Ámbito donde se agregará el símbolo.
+ * @param nombre Nombre del símbolo.
+ * @param tipo Tipo de dato asociado.
+ * @param renglon Línea donde aparece la declaración.
+ * @param columna Columna donde aparece la declaración.
+ * @return Entrada del símbolo creada o NULL si ya existe en el mismo ámbito.
+ */
 EntradaSimbolo *agregar_simbolo(TablaSimbolos *tabla, const char *nombre, enum TipoDato tipo, int renglon, int columna) {
     if (tabla == NULL || nombre == NULL) {
         return NULL;
@@ -108,6 +135,13 @@ EntradaSimbolo *agregar_simbolo(TablaSimbolos *tabla, const char *nombre, enum T
     return nueva_entrada;
 }
 
+/**
+ * Busca un símbolo únicamente dentro del ámbito actual.
+ *
+ * @param tabla Tabla de símbolos del ámbito consultado.
+ * @param nombre Nombre del símbolo a localizar.
+ * @return Entrada del símbolo si existe; de lo contrario NULL.
+ */
 EntradaSimbolo *buscar_simbolo_en_ambito_actual(TablaSimbolos *tabla, const char *nombre) {
     if (tabla == NULL || nombre == NULL) {
         return NULL;
@@ -123,6 +157,13 @@ EntradaSimbolo *buscar_simbolo_en_ambito_actual(TablaSimbolos *tabla, const char
     return NULL;
 }
 
+/**
+ * Busca un símbolo recorriendo la jerarquía de ámbitos desde el actual hacia los padres.
+ *
+ * @param tabla Tabla del ámbito actual.
+ * @param nombre Nombre del símbolo a localizar.
+ * @return Entrada del símbolo encontrado o NULL si no existe.
+ */
 EntradaSimbolo *buscar_simbolo(TablaSimbolos *tabla, const char *nombre) {
     TablaSimbolos *actual_ambito = tabla;
     while (actual_ambito != NULL) {
@@ -135,12 +176,23 @@ EntradaSimbolo *buscar_simbolo(TablaSimbolos *tabla, const char *nombre) {
     return NULL;
 }
 
+/**
+ * Imprime espacios de indentación para la jerarquía de tablas de símbolos.
+ *
+ * @param nivel Nivel de profundidad del ámbito.
+ */
 void imprimir_indentacion(int nivel) {
     for (int i = 0; i < nivel * 4; i++) {
         printf(" ");
     }
 }
 
+/**
+ * Muestra la estructura completa de ámbitos y símbolos en formato legible.
+ *
+ * @param tabla Tabla raíz a imprimir.
+ * @param nivel Profundidad actual en la jerarquía.
+ */
 void imprimir_jerarquia_tablas_simbolos(TablaSimbolos *tabla, int nivel) {
     if (tabla == NULL) {
         return;
@@ -192,6 +244,13 @@ void imprimir_jerarquia_tablas_simbolos(TablaSimbolos *tabla, int nivel) {
     }
 }
 
+/**
+ * Busca un símbolo revisando el ámbito actual y los ancestros.
+ *
+ * @param ambito Ámbito de inicio de búsqueda.
+ * @param nombre Nombre del símbolo.
+ * @return Entrada del símbolo encontrado o NULL.
+ */
 EntradaSimbolo *buscar_simbolo_ambitos(TablaSimbolos *ambito, const char *nombre)
 {
     TablaSimbolos *actual = ambito;

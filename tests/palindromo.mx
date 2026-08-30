@@ -1,0 +1,10 @@
+// Ejemplo: Palíndromo (palabra que se lee igual hacia adelante y atrás)
+
+Cadena palabra;
+Cadena alreves;
+
+Mostrar("Ingrese una palabra:\n");
+Leer(palabra);
+
+Mostrar("Usted escribio: ", palabra, "\n");
+Mostrar("Programa compilado exitosamente.\n");

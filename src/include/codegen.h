@@ -3,7 +3,7 @@
 
 #include "parser.h"
 #include "symbols.h"
-#define INITIAL_IR_CAPACITY 128 // Capacidad inicial, puedes ajustarla
+#define INITIAL_IR_CAPACITY 128
 
 typedef enum
 {
@@ -40,7 +40,7 @@ typedef struct
     char *result;
 } Quadruple;
 
-void init_ir_generator();
+void init_ir_generator(void);
 /**
  * @brief Inicia el proceso de generación de código intermedio.
  *
@@ -73,7 +73,7 @@ void emit_quad(IROperation op, const char *arg1, const char *arg2, const char *r
  *
  * @return Un puntero a una cadena de caracteres que representa el nuevo temporal.
  */
-char *new_temp();
+char *new_temp(void);
 
 /**
  * @brief Genera y devuelve un nuevo nombre de etiqueta único (ej., "L0", "L1").
@@ -83,28 +83,28 @@ char *new_temp();
  *
  * @return Un puntero a una cadena de caracteres que representa la nueva etiqueta.
  */
-char *new_label();
+char *new_label(void);
 
 /**
  * @brief Devuelve un puntero al arreglo global de cuádruplos generados.
  * @return Un puntero al inicio del arreglo de Quadruple.
  */
-Quadruple *get_ir_code();
+Quadruple *get_ir_code(void);
 
 /**
  * @brief Devuelve el número total de cuádruplos generados hasta el momento.
  * @return El número de cuádruplos.
  */
-int get_ir_code_size();
+int get_ir_code_size(void);
 
 /**
  * @brief Imprime el código intermedio generado a la salida estándar.
  */
-void imprimir_codigo_intermedio();
+void imprimir_codigo_intermedio(void);
 /**
  * @brief Optimiza el CodigoIntermedio de todas sus operaciones.
  */
-void optimize_ir_code();
+void optimize_ir_code(void);
 
 void generate_asm(FILE *f);
 #endif
