@@ -188,6 +188,19 @@ static int parse_arguments(int argc, const char *argv[], CompilerOptions *opts)
     return 0;
 }
 
+static int is_safe_command_path(const char *path)
+{
+    if (path == NULL || path[0] == '\0')
+        return 0;
+
+    for (const unsigned char *cursor = (const unsigned char *)path; *cursor; cursor++)
+    {
+        if (*cursor < 32 || strchr("\"'&|<>;$`!(){}[]^%", *cursor) != NULL)
+            return 0;
+    }
+    return 1;
+}
+
 /**
  * Realiza el análisis léxico y sintáctico del archivo fuente.
  *
@@ -401,14 +414,27 @@ static int generate_code(ASTNode *ast, TablaSimbolos *table, const char *asm_fil
 static int assemble_code(const char *asm_file, const char *obj_file)
 {
     char cmd[512];
+    int written;
+
+    if (!is_safe_command_path(asm_file) || !is_safe_command_path(obj_file))
+    {
+        log_error("assembly", "Ruta de archivo no permitida");
+        return -1;
+    }
 
 #if defined(_WIN32)
-    snprintf(cmd, sizeof(cmd), "nasm -f win64 %s -o %s", asm_file, obj_file);
+    written = snprintf(cmd, sizeof(cmd), "nasm -f win64 \"%s\" -o \"%s\"", asm_file, obj_file);
 #elif defined(__APPLE__)
-    snprintf(cmd, sizeof(cmd), "nasm -f macho64 %s -o %s", asm_file, obj_file);
+    written = snprintf(cmd, sizeof(cmd), "nasm -f macho64 \"%s\" -o \"%s\"", asm_file, obj_file);
 #else
-    snprintf(cmd, sizeof(cmd), "nasm -f elf64 %s -o %s", asm_file, obj_file);
+    written = snprintf(cmd, sizeof(cmd), "nasm -f elf64 \"%s\" -o \"%s\"", asm_file, obj_file);
 #endif
+
+    if (written < 0 || (size_t)written >= sizeof(cmd))
+    {
+        log_error("assembly", "Comando de ensamblado demasiado largo");
+        return -1;
+    }
 
     if (system(cmd) != 0)
     {
@@ -429,33 +455,41 @@ static int assemble_code(const char *asm_file, const char *obj_file)
 static int link_executable(const char *obj_file, const char *output_name)
 {
     char cmd[512];
+    int written;
+
+    if (!is_safe_command_path(obj_file) || !is_safe_command_path(output_name))
+    {
+        log_error("link", "Ruta de archivo no permitida");
+        return -1;
+    }
 
 #if defined(_WIN32)
-    snprintf(cmd, sizeof(cmd), "gcc %s runtime/mx_runtime.c -o %s.exe -lm -lws2_32", obj_file, output_name);
-    if (system(cmd) != 0)
-    {
-        log_error("link", "El enlazador fallo");
-        return -1;
-    }
-    log_success("build", "Compilacion completada: %s.exe", output_name);
-
+    written = snprintf(cmd, sizeof(cmd), "gcc \"%s\" \"runtime/mx_runtime.c\" -o \"%s.exe\" -lm -lws2_32", obj_file, output_name);
 #elif defined(__APPLE__)
     const char *link_arch = get_target_link_arch();
-    snprintf(cmd, sizeof(cmd), "clang -arch %s -Wl,-w %s runtime/mx_runtime.c -o %s -lm", link_arch, obj_file, output_name);
-    if (system(cmd) != 0)
-    {
-        log_error("link", "El enlazador fallo");
-        return -1;
-    }
-    log_success("build", "Compilacion completada: ./%s (%s)", output_name, link_arch);
+    written = snprintf(cmd, sizeof(cmd), "clang -arch %s -Wl,-w \"%s\" \"runtime/mx_runtime.c\" -o \"%s\" -lm", link_arch, obj_file, output_name);
 
 #else
-    snprintf(cmd, sizeof(cmd), "gcc %s runtime/mx_runtime.c -o %s -lm", obj_file, output_name);
+    written = snprintf(cmd, sizeof(cmd), "gcc \"%s\" \"runtime/mx_runtime.c\" -o \"%s\" -lm", obj_file, output_name);
+#endif
+
+    if (written < 0 || (size_t)written >= sizeof(cmd))
+    {
+        log_error("link", "Comando de enlazado demasiado largo");
+        return -1;
+    }
+
     if (system(cmd) != 0)
     {
         log_error("link", "El enlazador fallo");
         return -1;
     }
+
+#if defined(_WIN32)
+    log_success("build", "Compilacion completada: %s.exe", output_name);
+#elif defined(__APPLE__)
+    log_success("build", "Compilacion completada: ./%s (%s)", output_name, link_arch);
+#else
     log_success("build", "Compilacion completada: ./%s", output_name);
 #endif
 
@@ -471,14 +505,24 @@ static int link_executable(const char *obj_file, const char *output_name)
 static int run_executable(const char *output_name)
 {
     char cmd[512];
+    int written;
+
+    if (!is_safe_command_path(output_name))
+    {
+        log_error("runtime", "Ruta de ejecutable no permitida");
+        return -1;
+    }
 
     log_info("runtime", "Ejecutando %s...", output_name);
 
 #ifdef _WIN32
-    snprintf(cmd, sizeof(cmd), "%s.exe", output_name);
+    written = snprintf(cmd, sizeof(cmd), "\"%s.exe\"", output_name);
 #else
-    snprintf(cmd, sizeof(cmd), "./%s", output_name);
+    written = snprintf(cmd, sizeof(cmd), "\"./%s\"", output_name);
 #endif
+
+    if (written < 0 || (size_t)written >= sizeof(cmd))
+        return -1;
 
     int status = system(cmd);
     return status;
@@ -565,7 +609,6 @@ static void print_debug_info(CompilationContext *ctx)
         }
         fclose(asm_fp);
     }
-
     fprintf(stderr, "\n=== FIN DEBUG ===\n\n");
 }
 

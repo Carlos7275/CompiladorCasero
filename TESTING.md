@@ -11,6 +11,11 @@ El compilador Casero incluye una suite completa de 13 programas de prueba que cu
 ./run_tests.sh
 ```
 
+En Windows PowerShell:
+```powershell
+.\run_tests.ps1
+```
+
 Salida esperada:
 ```
 =====================================

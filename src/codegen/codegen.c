@@ -208,6 +208,11 @@ static char *new_string_temp(void)
     return strdup(temp_name_buffer);
 }
 
+static int es_temporal_prefijado(const char *s, char prefix)
+{
+    return s && s[0] == prefix && isdigit((unsigned char)s[1]);
+}
+
 /**
  * Genera una etiqueta única para saltos y bifurcaciones del IR.
  *
@@ -928,7 +933,8 @@ static int es_operando_flotante(const char *s)
 {
     if (!s)
         return 0;
-    if (strncmp(s, "__float_", 8) == 0 || s[0] == 'f' ||
+    if (strncmp(s, "__float_", 8) == 0 ||
+        es_temporal_prefijado(s, 'f') ||
         (strcmp(s, "__return") == 0 && current_return_type == FLOAT))
         return 1;
     EntradaSimbolo *entry = buscar_simbolo_ambitos(ambito_actual, s);
@@ -974,7 +980,7 @@ int es_literal(const char *s)
 }
 static int es_temporal(const char *s)
 {
-    return s && s[0] == 't' && s[1] != '\0';
+    return es_temporal_prefijado(s, 't');
 }
 
 static void sustituir_uso_temporal(char *dst, const char *src)
@@ -1488,7 +1494,12 @@ void generate_asm(FILE *f)
             {
                 if (!(var[0] == 'L' && isdigit((unsigned char)var[1])))
                 {
-                    strcpy(declared_vars[declared_vars_count++], var);
+                    if (declared_vars_count >= MAX_BUFFER || strlen(var) >= sizeof(declared_vars[0]))
+                    {
+                        fprintf(stderr, "Error: demasiadas variables o nombre de variable demasiado largo.\n");
+                        exit(EXIT_FAILURE);
+                    }
+                    snprintf(declared_vars[declared_vars_count++], sizeof(declared_vars[0]), "%s", var);
                     EntradaSimbolo *entry = buscar_simbolo(ambito_actual, var);
                     if (entry != NULL && entry->tipo == STRING)
                         fprintf(f, "    %s resb 256\n", var);
@@ -1504,7 +1515,12 @@ void generate_asm(FILE *f)
             while (arg) {
                 if (is_valid_varname(arg) &&
                     !var_declared(declared_vars, declared_vars_count, arg)) {
-                    strcpy(declared_vars[declared_vars_count++], arg);
+                    if (declared_vars_count >= MAX_BUFFER || strlen(arg) >= sizeof(declared_vars[0]))
+                    {
+                        fprintf(stderr, "Error: demasiadas variables o nombre de variable demasiado largo.\n");
+                        exit(EXIT_FAILURE);
+                    }
+                    snprintf(declared_vars[declared_vars_count++], sizeof(declared_vars[0]), "%s", arg);
                     EntradaSimbolo *entry = buscar_simbolo(ambito_actual, arg);
                     if (entry && entry->tipo == STRING)
                         fprintf(f, "    %s resb 256\n", arg);
@@ -1603,7 +1619,7 @@ void generate_asm(FILE *f)
                     fprintf(f, "    lea rax, [rel str_%d]\n    mov [rel %s], rax\n", i, q->result);
                 }
             }
-            else if (q->arg1[0] == 's' && isdigit((unsigned char)q->arg1[1]) &&
+            else if (es_temporal_prefijado(q->arg1, 's') &&
                      buscar_simbolo(ambito_actual, q->result) != NULL &&
                      buscar_simbolo(ambito_actual, q->result)->tipo == STRING)
             {
@@ -1845,6 +1861,15 @@ void generate_asm(FILE *f)
                         q->arg1, printf_sym);
                 }
             }
+            else
+            {
+                fprintf(f,
+                    "    lea rcx, [rel fmt_int]\n"
+                    "    mov rdx, [rel %s]\n"
+                    "    xor eax, eax\n"
+                    "    call %s\n",
+                    q->arg1, printf_sym);
+            }
 #else
             if (is_string_literal(q->arg1))
             {
@@ -1903,7 +1928,7 @@ void generate_asm(FILE *f)
                         q->arg1, printf_sym);
                 }
             }
-            else if (q->arg1[0] == 's' && isdigit((unsigned char)q->arg1[1]))
+            else if (es_temporal_prefijado(q->arg1, 's'))
             {
                 fprintf(f,
                     "    mov rsi, [rel %s]\n"
