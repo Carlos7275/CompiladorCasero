@@ -4,6 +4,7 @@
 #define CUBETAS_TABLA_SIMBOLOS 100
 
 #include "types.h"
+#include <stdint.h>
 
 typedef struct EntradaSimbolo
 {
@@ -12,7 +13,7 @@ typedef struct EntradaSimbolo
     int es_constante;
     union
     {
-        int valor_int;
+        int64_t valor_int;
         double valor_float;
         char *valor_cadena;
         int valor_bool;

@@ -1,0 +1,10 @@
+Entero negativo = 0 - 7;
+Flotante angulo = 0.0;
+Cadena texto;
+texto = "Mx";
+
+Mostrar(Abs(negativo), "\n");
+Mostrar(Min(8, 3), " ", Max(8, 3), "\n");
+Mostrar(Potencia(2.0, 3.0), " ", RaizCuadrada(9.0), "\n");
+Mostrar(Longitud(texto), " ", Comparar(texto, "Mx"), "\n");
+Mostrar(Contiene(texto, "x"), "\n");

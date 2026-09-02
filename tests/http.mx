@@ -1,0 +1,11 @@
+Cadena url = "http://httpbin.org/get?lenguaje=mx&tipo=prueba";
+Cadena headers = "Accept: application/json\nUser-Agent: Mx";
+Cadena cuerpo_vacio = "";
+
+Entero estado = Http(url, "GET", headers, cuerpo_vacio);
+Cadena respuesta_headers = HttpCabeceras();
+Cadena respuesta_body = HttpCuerpo();
+
+Mostrar("Estado: ", estado, "\n");
+Mostrar("Cabeceras:\n", respuesta_headers, "\n");
+Mostrar("JSON recibido:\n", respuesta_body, "\n");

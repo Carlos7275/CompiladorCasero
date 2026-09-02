@@ -1,0 +1,4 @@
+Entero maximo = 9223372036854775807;
+Entero minimo = -9223372036854775808;
+Mostrar(maximo, "\n");
+Mostrar(minimo, "\n");

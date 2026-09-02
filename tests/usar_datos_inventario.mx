@@ -1,0 +1,9 @@
+Importar "lib_datos.mx";
+Importar "lib_inventario.mx";
+
+Medicion medida;
+medida.valor = convertir_a_metros(350.0);
+medida.unidad = 1;
+
+Mostrar("Metros: ", medida.valor, "\n");
+Mostrar("Existencias: ", total_existencias(), "\n");

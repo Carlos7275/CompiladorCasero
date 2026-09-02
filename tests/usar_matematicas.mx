@@ -1,0 +1,8 @@
+Importar "lib_matematicas.mx";
+
+Entero lado = 4;
+Flotante precio = 250.0;
+
+Mostrar("Cuadrado: ", cuadrado(lado), "\n");
+Mostrar("Cubo: ", cubo(lado), "\n");
+Mostrar("Descuento: ", porcentaje(precio, 10.0), "\n");

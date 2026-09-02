@@ -1,0 +1,9 @@
+// Arrays de enteros: inicialización, lectura y escritura.
+
+Entero numeros[5] = {10, 20, 30, 40, 50};
+
+Mostrar("Array inicial:\n");
+Mostrar(numeros[0], " ", numeros[1], " ", numeros[2], " ", numeros[3], " ", numeros[4], "\n");
+
+numeros[2] = numeros[0] + numeros[4];
+Mostrar("numeros[2] despues de modificarlo: ", numeros[2], "\n");

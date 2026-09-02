@@ -1,0 +1,13 @@
+// Librería de utilidades para texto.
+
+Void imprimir_titulo() {
+    Mostrar("=== Utilidad de texto ===\n");
+}
+
+Cadena saludo() {
+    Retornar "Hola desde una libreria Mx";
+}
+
+Void imprimir_linea() {
+    Mostrar("-------------------------\n");
+}

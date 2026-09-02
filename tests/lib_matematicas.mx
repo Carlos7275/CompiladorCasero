@@ -1,0 +1,13 @@
+// Librería de operaciones matemáticas básicas.
+
+Entero cuadrado(Entero valor) {
+    Retornar valor * valor;
+}
+
+Entero cubo(Entero valor) {
+    Retornar valor * valor * valor;
+}
+
+Flotante porcentaje(Flotante valor, Flotante porcentaje) {
+    Retornar valor * porcentaje / 100.0;
+}

@@ -1,0 +1,8 @@
+// Arrays de flotantes con operaciones aritméticas.
+
+Flotante precios[3] = {12.5, 3.25, 4.25};
+Flotante total = precios[0] + precios[1] + precios[2];
+
+Mostrar("Precio total: ", total, "\n");
+precios[1] = precios[1] * 2.0;
+Mostrar("Segundo precio actualizado: ", precios[1], "\n");

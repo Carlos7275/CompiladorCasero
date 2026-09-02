@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include "types.h"
 
 enum ASTNodeType
@@ -51,6 +52,11 @@ enum ASTNodeType
     AST_LITERAL_FLOTANTE,
     AST_LITERAL_CADENA,
     AST_LITERAL_BOOLEANO
+    ,AST_DECLARACION_TIPO
+    ,AST_FUNCION
+    ,AST_LLAMADA
+    ,AST_RETORNAR_STMT
+    ,AST_IMPORT
 };
 
 enum ASTConstant
@@ -71,6 +77,7 @@ typedef struct ASTNode
     {
         char *nombre_id;
         double valor_numero;
+        int64_t valor_entero;
         char *valor_cadena;
         unsigned int valor_booleano;
     } valor;
@@ -82,6 +89,9 @@ typedef struct ASTNode
     int renglon;
     int columna;
     char *ir_result_name;
+    struct ASTNode *parametros;
+    enum TipoDato return_type;
+    char *tipo_nombre;
 
 } ASTNode;
 

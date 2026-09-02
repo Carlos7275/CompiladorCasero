@@ -75,6 +75,26 @@ Opciones:
 ./build/bin/compilador tests/ejemplo1.mx mi_programa -asm
 ```
 
+### Bibliotecas propias
+Un programa puede incorporar otro archivo Mx con una ruta relativa al archivo
+fuente que contiene la importación:
+```mx
+Importar "lib/matematicas.mx";
+Mostrar(doblar(21));
+```
+Las funciones y tipos declarados en la biblioteca quedan disponibles como si
+estuvieran en el programa principal. Las importaciones se expanden
+recursivamente; no se permiten ciclos y la profundidad máxima es 64 archivos.
+
+Ejemplos adicionales:
+
+- `tests/lib_matematicas.mx`: cuadrados, cubos y porcentajes.
+- `tests/lib_texto.mx`: texto y procedimientos `Void`.
+- `tests/lib_datos.mx`: tipo personalizado `Medicion`.
+- `tests/lib_inventario.mx`: array de existencias.
+- `tests/usar_matematicas.mx`, `tests/usar_texto.mx` y
+  `tests/usar_datos_inventario.mx`: programas consumidores.
+
 ## 🧪 Ejecución de Pruebas
 
 ```bash
@@ -201,6 +221,7 @@ programa.mx
 ## 📝 Declaraciones Soportadas
 
 - `Entero`, `Flotante`, `Cadena` - Declaración de variables
+- Arrays de tamaño fijo con índices constantes, por ejemplo `Entero nums[3] = {10, 20, 30};` y `Mostrar(nums[1]);`
 - `Si`, `Sino` - Condicionales
 - `Para` - Bucle for
 - `Mientras` - Bucle while
@@ -208,6 +229,107 @@ programa.mx
 - `Continuar` - Continue
 - `Mostrar` - Salida (printf)
 - `Leer` - Entrada (scanf)
+
+Los arrays se almacenan como elementos independientes y actualmente requieren un tamaño entero positivo e índices constantes.
+
+Las funciones usan retorno tipado y parámetros por valor:
+```mx
+Entero sumar(Entero a, Entero b) {
+    Retornar a + b;
+}
+Void saludar() {
+    Mostrar("Hola\n");
+}
+```
+
+También se pueden declarar tipos personalizados y variables de esos tipos:
+```mx
+Tipo Persona { Entero edad; };
+Persona p;
+```
+Los campos pueden leerse y asignarse con notación de punto:
+```mx
+p.edad = 35;
+Mostrar(p.edad);
+```
+Internamente los campos se almacenan como miembros planos, por lo que actualmente se admiten campos de tipos primitivos.
+
+### Funciones nativas
+
+Mx incluye funciones nativas para no tener que reimplementar operaciones comunes:
+
+| Grupo | Funciones |
+|------|-----------|
+| Enteros | `Abs`, `Absoluto`, `Min`, `Max` |
+| Aleatoriedad | `Aleatorio()`, `Aleatorio(max)`, `AleatorioEntre(min, max)` |
+| Trigonometría | `Seno`, `Coseno`, `Tangente` |
+| Potencias y logaritmos | `Potencia`, `RaizCuadrada`, `Logaritmo`, `Exponencial` |
+| Redondeo | `Piso`, `Techo`, `Redondear` |
+| Cadenas | `Longitud`, `Comparar`, `Contiene` |
+
+Ejemplo:
+```mx
+Flotante x = Potencia(2.0, 8.0);
+Cadena mensaje = "Hola Mx";
+Mostrar(x, " ", Longitud(mensaje), "\n");
+```
+
+Las funciones numéricas aceptan los tipos indicados por su firma; las funciones
+de cadenas reciben `Cadena`. Los errores de cantidad o tipo de argumentos se
+reportan durante el análisis semántico.
+
+`Aleatorio(max)` devuelve un entero entre `0` y `max - 1`.
+`AleatorioEntre(min, max)` devuelve un entero dentro del rango inclusivo.
+Ambas usan el generador de la biblioteca estándar del sistema.
+
+### Configuración `.env`
+
+Si existe un archivo `.env` junto al programa fuente, el compilador carga sus
+pares `CLAVE=VALOR` antes de compilar. Las variables ya definidas en el sistema
+tienen prioridad. Desde Mx se consultan así:
+
+```mx
+Cadena url = Entorno("API_URL");
+Si (ExisteEntorno("API_URL")) {
+    Mostrar(url, "\n");
+}
+```
+
+El archivo `.env` no se incluye automáticamente en el ejecutable ni debe
+versionarse si contiene credenciales.
+
+### HTTP con sockets del sistema
+
+Mx incluye una primera capa HTTP mediante sockets del sistema en
+`runtime/mx_runtime.c`:
+
+```mx
+Cadena url = Entorno("API_URL");
+Entero estado = Http(url, "GET", "Accept: application/json", "");
+Cadena cuerpo = HttpCuerpo();
+Mostrar("Estado: ", estado, "\n");
+Mostrar(cuerpo);
+```
+
+`Http(url, metodo, cabeceras, cuerpo)` acepta cualquier método HTTP, cabeceras
+separadas por saltos de línea y un cuerpo opcional. La respuesta de la última
+petición se consulta por partes:
+
+```mx
+Cadena cabeceras = HttpCabeceras();
+Cadena cuerpo = HttpCuerpo();
+Mostrar("Cabeceras: ", cabeceras, "\n");
+Mostrar("Cuerpo: ", cuerpo, "\n");
+```
+
+`HttpCuerpo()` devuelve el texto completo de la respuesta (por ejemplo, JSON)
+hasta 1 MiB. `HttpCabeceras()` devuelve las cabeceras de respuesta separadas
+por saltos de línea. La implementación usa
+HTTP/1.1 sobre TCP y resolución DNS del sistema, sin depender de `curl`.
+Actualmente `https://` devuelve `0` hasta añadir TLS nativo por plataforma:
+Schannel en Windows, Secure Transport en macOS y una biblioteca TLS explícita
+en Linux. Esto evita presentar una conexión sin cifrar como HTTPS.
+La prueba mínima está en `tests/http.mx`.
 
 ## 🛠️ Mantenimiento
 

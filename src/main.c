@@ -3,6 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include "file.h"
 #include "types.h"
 #include "parser.h"
@@ -188,8 +189,130 @@ static int parse_arguments(int argc, const char *argv[], CompilerOptions *opts)
  */
 static ASTNode *parse_source_file(FILE *source_fp)
 {
+    reiniciar_tokens();
     analizar_archivo(source_fp);
     return parsePrograma();
+}
+
+static int path_in_stack(const char *path, const char **stack, int depth)
+{
+    for (int i = 0; i < depth; i++)
+        if (strcmp(path, stack[i]) == 0) return 1;
+    return 0;
+}
+
+static ASTNode *parse_module_path(const char *path)
+{
+    FILE *fp = leer_archivo(path);
+    if (fp == NULL)
+    {
+        log_error("import", "No se pudo abrir biblioteca: %s", path);
+        return NULL;
+    }
+    ASTNode *ast = parse_source_file(fp);
+    return ast;
+}
+
+static int import_failed = 0;
+
+static void cargar_dotenv(const char *source_path)
+{
+    char path[PATH_MAX];
+    const char *slash = strrchr(source_path, '/');
+    if (slash)
+        snprintf(path, sizeof(path), "%.*s.env", (int)(slash - source_path + 1), source_path);
+    else
+        snprintf(path, sizeof(path), ".env");
+
+    FILE *env = fopen(path, "r");
+    if (!env) return;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), env)) {
+        char *key = line;
+        while (isspace((unsigned char)*key)) key++;
+        if (*key == '#' || *key == '\0') continue;
+        if (strncmp(key, "export ", 7) == 0) key += 7;
+        char *equals = strchr(key, '=');
+        if (!equals) continue;
+        *equals = '\0';
+        char *value = equals + 1;
+        char *end = key + strlen(key);
+        while (end > key && isspace((unsigned char)end[-1])) *--end = '\0';
+        value[strcspn(value, "\r\n")] = '\0';
+        if (value[0] == '"' && value[strlen(value) - 1] == '"') {
+            value[strlen(value) - 1] = '\0';
+            value++;
+        }
+        if (*key != '\0' && getenv(key) == NULL)
+            setenv(key, value, 0);
+    }
+    fclose(env);
+}
+
+/* Replaces import nodes with the declarations from the referenced module. */
+static ASTNode *expand_imports(ASTNode *program, const char *source_path,
+                               const char **stack, int depth)
+{
+    if (program == NULL) return NULL;
+    if (depth >= 64)
+    {
+        log_error("import", "Se excedio la profundidad maxima de importaciones (64)");
+        import_failed = 1;
+        return NULL;
+    }
+    char canonical[PATH_MAX];
+    if (realpath(source_path, canonical) == NULL)
+        snprintf(canonical, sizeof(canonical), "%s", source_path);
+    if (path_in_stack(canonical, stack, depth))
+    {
+        log_error("import", "Ciclo de importacion detectado: %s", source_path);
+        import_failed = 1;
+        return NULL;
+    }
+    stack[depth] = strdup(canonical);
+
+    ASTNode *head = NULL, *tail = NULL;
+    ASTNode *node = program->hijo_izq;
+    while (node != NULL)
+    {
+        ASTNode *next = node->siguiente_hermano;
+        node->siguiente_hermano = NULL;
+        if (node->type == AST_IMPORT)
+        {
+            char imported[PATH_MAX];
+            const char *slash = strrchr(source_path, '/');
+            size_t dir_len = slash ? (size_t)(slash - source_path + 1) : 0;
+            if (node->valor.valor_cadena[0] == '/')
+                snprintf(imported, sizeof(imported), "%s", node->valor.valor_cadena);
+            else
+                snprintf(imported, sizeof(imported), "%.*s%s", (int)dir_len,
+                         source_path, node->valor.valor_cadena);
+            ASTNode *module = parse_module_path(imported);
+            if (module == NULL) import_failed = 1;
+            ASTNode *module_nodes = module ? expand_imports(module, imported, stack, depth + 1) : NULL;
+            if (module) { module->hijo_izq = NULL; free(module); }
+            free(node->valor.valor_cadena);
+            free(node);
+            while (module_nodes)
+            {
+                ASTNode *mn = module_nodes;
+                module_nodes = mn->siguiente_hermano;
+                mn->siguiente_hermano = NULL;
+                if (!head) head = mn; else tail->siguiente_hermano = mn;
+                tail = mn;
+            }
+        }
+        else
+        {
+            if (!head) head = node; else tail->siguiente_hermano = node;
+            tail = node;
+        }
+        node = next;
+    }
+    free((char *)stack[depth]);
+    program->hijo_izq = head;
+    return head;
 }
 
 /**
@@ -276,7 +399,7 @@ static int link_executable(const char *obj_file, const char *output_name)
     char cmd[512];
 
 #if defined(_WIN32)
-    snprintf(cmd, sizeof(cmd), "gcc %s -o %s.exe", obj_file, output_name);
+    snprintf(cmd, sizeof(cmd), "gcc %s runtime/mx_runtime.c -o %s.exe -lm -lws2_32", obj_file, output_name);
     if (system(cmd) != 0)
     {
         log_error("link", "El enlazador fallo");
@@ -286,7 +409,7 @@ static int link_executable(const char *obj_file, const char *output_name)
 
 #elif defined(__APPLE__)
     const char *link_arch = get_target_link_arch();
-    snprintf(cmd, sizeof(cmd), "clang -arch %s -Wl,-w %s -o %s", link_arch, obj_file, output_name);
+    snprintf(cmd, sizeof(cmd), "clang -arch %s -Wl,-w %s runtime/mx_runtime.c -o %s -lm", link_arch, obj_file, output_name);
     if (system(cmd) != 0)
     {
         log_error("link", "El enlazador fallo");
@@ -295,7 +418,7 @@ static int link_executable(const char *obj_file, const char *output_name)
     log_success("build", "Compilacion completada: ./%s (%s)", output_name, link_arch);
 
 #else
-    snprintf(cmd, sizeof(cmd), "gcc %s -o %s", obj_file, output_name);
+    snprintf(cmd, sizeof(cmd), "gcc %s runtime/mx_runtime.c -o %s -lm", obj_file, output_name);
     if (system(cmd) != 0)
     {
         log_error("link", "El enlazador fallo");
@@ -443,10 +566,20 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
+    cargar_dotenv(opts.source_file);
     ctx.ast = parse_source_file(ctx.source_fp);
     if (ctx.ast == NULL)
     {
         log_error("parser", "Fallo el analisis sintactico");
+        free_compilation_context(&ctx);
+        return EXIT_FAILURE;
+    }
+
+    const char *import_stack[64] = {0};
+    import_failed = 0;
+    expand_imports(ctx.ast, opts.source_file, import_stack, 0);
+    if (import_failed)
+    {
         free_compilation_context(&ctx);
         return EXIT_FAILURE;
     }

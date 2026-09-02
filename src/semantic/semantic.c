@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "types.h"
 #include "parser.h"
@@ -14,6 +15,66 @@ struct ErrorSemantico *cabeza_errores = NULL;
 int profundidad_loop = 0;
 
 int contador_errores_semanticos = 0;
+static ASTNode *raiz_semantica = NULL;
+
+typedef struct
+{
+    const char *nombre;
+    enum TipoDato retorno;
+    enum TipoDato primero;
+    enum TipoDato segundo;
+    int argumentos;
+    enum TipoDato tercero;
+    enum TipoDato cuarto;
+} FuncionNativa;
+
+static const FuncionNativa funciones_nativas[] = {
+    {"Abs", INT, INT, TIPO_ERROR, 1},
+    {"Absoluto", INT, INT, TIPO_ERROR, 1},
+    {"Min", INT, INT, INT, 2},
+    {"Max", INT, INT, INT, 2},
+    {"Potencia", FLOAT, FLOAT, FLOAT, 2},
+    {"RaizCuadrada", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Seno", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Coseno", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Tangente", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Logaritmo", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Exponencial", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Piso", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Techo", FLOAT, FLOAT, TIPO_ERROR, 1},
+    {"Redondear", INT, FLOAT, TIPO_ERROR, 1},
+    {"Longitud", INT, STRING, TIPO_ERROR, 1},
+    {"Comparar", INT, STRING, STRING, 2},
+    {"Contiene", BOOL, STRING, STRING, 2},
+    {"Aleatorio", INT, TIPO_ERROR, TIPO_ERROR, 0},
+    {"Aleatorio", INT, INT, TIPO_ERROR, 1},
+    {"AleatorioEntre", INT, INT, INT, 2},
+    {"Entorno", STRING, STRING, TIPO_ERROR, 1},
+    {"ExisteEntorno", BOOL, STRING, TIPO_ERROR, 1},
+    {"Http", INT, STRING, STRING, 4, STRING, STRING},
+    {"HttpCuerpo", STRING, TIPO_ERROR, TIPO_ERROR, 0},
+    {"HttpCabeceras", STRING, TIPO_ERROR, TIPO_ERROR, 0}
+};
+
+static const FuncionNativa *buscar_funcion_nativa(const char *nombre, int argumentos)
+{
+    for (size_t i = 0; i < sizeof(funciones_nativas) / sizeof(funciones_nativas[0]); i++)
+        if (strcmp(funciones_nativas[i].nombre, nombre) == 0 &&
+            funciones_nativas[i].argumentos == argumentos)
+            return &funciones_nativas[i];
+    return NULL;
+}
+
+static ASTNode *buscar_tipo(ASTNode *node, const char *nombre)
+{
+    for (ASTNode *actual = node; actual; actual = actual->siguiente_hermano)
+    {
+        if (actual->type == AST_DECLARACION_TIPO && actual->hijo_izq &&
+            strcmp(actual->hijo_izq->valor.nombre_id, nombre) == 0)
+            return actual;
+    }
+    return NULL;
+}
 
 /**
  * Registra un error semántico con información de ubicación y mensaje formateado.
@@ -325,6 +386,7 @@ enum TipoDato verificar_negacion_logica(int renglon, int columna, enum TipoDato 
 TablaSimbolos *realizar_analisis_semantico(ASTNode *raiz_ast)
 {
     ambito_actual = crear_tabla_simbolos(NULL);
+    raiz_semantica = raiz_ast;
     inicializarTablaSimbolos();
     visit_ast_semantic(raiz_ast);
     return ambito_actual;
@@ -367,7 +429,7 @@ void inicializarTablaSimbolos()
     if (entrada)
     {
         entrada->es_constante = 1;
-        entrada->valor_constante.valor_int = 2147483647;
+        entrada->valor_constante.valor_int = INT64_MAX;
     }
     else
     {
@@ -395,6 +457,55 @@ void visit_ast_semantic(ASTNode *node)
 
     switch (node->type)
     {
+    case AST_IMPORT:
+        reportar_error_semantico(node->renglon, node->columna,
+                                 "Importacion no resuelta: '%s'", node->valor.valor_cadena);
+        break;
+    case AST_DECLARACION_TIPO:
+        if (node->hijo_izq && !buscar_simbolo_en_ambito_actual(ambito_actual, node->hijo_izq->valor.nombre_id))
+            agregar_simbolo(ambito_actual, node->hijo_izq->valor.nombre_id, OTRO, node->renglon, node->columna);
+        break;
+    case AST_FUNCION:
+        if (node->hijo_izq) agregar_simbolo(ambito_actual, node->hijo_izq->valor.nombre_id,
+                                             node->return_type, node->renglon, node->columna);
+        for (ASTNode *p = node->parametros; p; p = p->siguiente_hermano)
+            if (p->hijo_izq) agregar_simbolo(ambito_actual, p->hijo_izq->valor.nombre_id,
+                                              p->declared_type_info, p->renglon, p->columna);
+        visit_ast_semantic(node->hijo_der);
+        break;
+    case AST_LLAMADA:
+        if (node->hijo_der) for (ASTNode *a=node->hijo_der; a; a=a->siguiente_hermano) visit_ast_semantic(a);
+        if (node->hijo_izq) {
+            EntradaSimbolo *f = buscar_simbolo(ambito_actual, node->hijo_izq->valor.nombre_id);
+            int argc = 0;
+            for (ASTNode *a = node->hijo_der; a; a = a->siguiente_hermano) argc++;
+            const FuncionNativa *nativa = buscar_funcion_nativa(node->hijo_izq->valor.nombre_id, argc);
+            if (nativa) {
+                {
+                    ASTNode *a = node->hijo_der;
+                    enum TipoDato esperados[] = {
+                        nativa->primero, nativa->segundo, nativa->tercero, nativa->cuarto
+                    };
+                    int tipos_invalidos = 0;
+                    for (int i = 0; i < nativa->argumentos && a; i++, a = a->siguiente_hermano)
+                        if (esperados[i] != TIPO_ERROR && a->resolved_type != esperados[i])
+                            tipos_invalidos = 1;
+                    if (tipos_invalidos) {
+                        reportar_error_semantico(node->renglon, node->columna,
+                                                 "Tipos invalidos para la funcion nativa '%s'.",
+                                                 nativa->nombre);
+                        node->resolved_type = TIPO_ERROR;
+                    } else node->resolved_type = nativa->retorno;
+                }
+            } else if (!f) {
+                reportar_error_semantico(node->renglon,node->columna,"Funcion no declarada: '%s'",node->hijo_izq->valor.nombre_id);
+                node->resolved_type=TIPO_ERROR;
+            } else node->resolved_type = f->tipo;
+        }
+        break;
+    case AST_RETORNAR_STMT:
+        if (node->hijo_izq) visit_ast_semantic(node->hijo_izq);
+        break;
     case AST_PROGRAMA:
     {
         ASTNode *current_child = node->hijo_izq;
@@ -432,6 +543,21 @@ void visit_ast_semantic(ASTNode *node)
         if (simbolo_agregado != NULL)
         {
             simbolo_agregado->es_constante = 0;
+        }
+        if (node->tipo_nombre != NULL)
+        {
+            ASTNode *tipo = buscar_tipo(raiz_semantica->hijo_izq, node->tipo_nombre);
+            if (tipo != NULL)
+            {
+                for (ASTNode *campo = tipo->hijo_der; campo; campo = campo->siguiente_hermano)
+                {
+                    char nombre_campo[256];
+                    snprintf(nombre_campo, sizeof(nombre_campo), "%s__%s",
+                             node->hijo_izq->valor.nombre_id, campo->hijo_izq->valor.nombre_id);
+                    agregar_simbolo(ambito_actual, nombre_campo,
+                                    campo->declared_type_info, campo->renglon, campo->columna);
+                }
+            }
         }
 
         if (node->hijo_der != NULL)
@@ -481,7 +607,7 @@ void visit_ast_semantic(ASTNode *node)
             {
                 if (tipo_declarado == INT)
                 {
-                    simbolo_agregado->valor_constante.valor_int = (int)node->hijo_der->valor.valor_numero;
+                    simbolo_agregado->valor_constante.valor_int = node->hijo_der->valor.valor_entero;
                 }
                 else if (tipo_declarado == FLOAT)
                 {
