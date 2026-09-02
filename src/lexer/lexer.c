@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante"};
+const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante", "Void", "void", "Retornar", "Importar"};
 
 /**
  * Reconoce un identificador o palabra reservada.
@@ -135,7 +135,8 @@ void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
                  next_char == '!' || next_char == '&' || next_char == '|' ||
                  next_char == '(' || next_char == ')' ||
                  next_char == '[' || next_char == ']' ||
-                 next_char == '{' || next_char == '}')
+                 next_char == '{' || next_char == '}' ||
+                 next_char == ',' || next_char == ':' || next_char == '.')
         {
             ungetc(next_char, arch); // Devolver el carácter al flujo
             break;                   // Terminar el procesamiento del número
@@ -175,6 +176,8 @@ enum TipoDato EsPalabraReservadaConTipo(const char *lexema, enum TipoToken *out_
 
                 return BOOL;
             }
+            if (strcmp(lexema, "Void") == 0 || strcmp(lexema, "void") == 0)
+                return TIPO_VOID;
 
             return TIPO_VOID;
         }
@@ -354,6 +357,7 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
     case ';':
     case ':':                                               // El caracter ':' se maneja aquí como símbolo especial
     case ',':                                               // La coma también es un símbolo especial
+    case '.':
         lexema[i] = '\0';                                   // Aseguramos nulo-terminación
         generarToken(ESPECIAL, lexema, OTRO, Col, Renglon); // Símbolos Especiales
         break;

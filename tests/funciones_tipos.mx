@@ -1,0 +1,18 @@
+// Funciones con parámetros y diferentes tipos de retorno.
+
+Entero sumar(Entero a, Entero b) {
+    Retornar a + b;
+}
+
+Flotante promedio() {
+    Retornar (10.0 + 14.0) / 2.0;
+}
+
+Cadena mensaje() {
+    Retornar "Resultado calculado";
+}
+
+Entero entero = sumar(18, 24);
+Flotante decimal = promedio();
+
+Mostrar(mensaje(), ": ", entero, " / ", decimal, "\n");

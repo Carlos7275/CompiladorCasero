@@ -1,0 +1,7 @@
+// Librería con un array de valores predefinidos.
+
+Entero existencias[4] = {12, 8, 15, 20};
+
+Entero total_existencias() {
+    Retornar existencias[0] + existencias[1] + existencias[2] + existencias[3];
+}

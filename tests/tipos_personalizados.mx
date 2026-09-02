@@ -1,0 +1,13 @@
+// Declaración y uso nominal de un tipo personalizado.
+// Los campos todavía no tienen acceso estructural en el backend.
+
+Tipo Persona {
+    Entero edad;
+    Cadena nombre;
+};
+
+Persona persona;
+persona.edad = 25;
+persona.nombre = "Carlos Sandoval";
+Mostrar("Nombre: ", persona.nombre, "\n");
+Mostrar("Edad: ", persona.edad, "\n");

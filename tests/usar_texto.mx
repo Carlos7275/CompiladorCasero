@@ -1,0 +1,5 @@
+Importar "lib_texto.mx";
+
+imprimir_titulo();
+Mostrar(saludo(), "\n");
+imprimir_linea();

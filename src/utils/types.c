@@ -6,6 +6,20 @@
 struct nodo *raiz = NULL;
 struct nodo *actual = NULL;
 
+void reiniciar_tokens(void)
+{
+    struct nodo *n = raiz;
+    while (n != NULL)
+    {
+        struct nodo *next = n->der;
+        free(n->info.Lexema);
+        free(n);
+        n = next;
+    }
+    raiz = NULL;
+    actual = NULL;
+}
+
 void Insertar(struct Token token)
 {
     struct nodo *nuevo;

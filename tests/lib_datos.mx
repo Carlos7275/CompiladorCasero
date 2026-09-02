@@ -1,0 +1,10 @@
+// Librería que exporta un tipo personalizado y una función de fábrica.
+
+Tipo Medicion {
+    Flotante valor;
+    Entero unidad;
+};
+
+Flotante convertir_a_metros(Flotante centimetros) {
+    Retornar centimetros / 100.0;
+}

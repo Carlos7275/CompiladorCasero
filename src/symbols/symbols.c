@@ -216,7 +216,7 @@ void imprimir_jerarquia_tablas_simbolos(TablaSimbolos *tabla, int nivel) {
 
                 if (entrada->es_constante) {
                     if (entrada->tipo == INT) {
-                        printf(", Valor: %d", entrada->valor_constante.valor_int);
+                        printf(", Valor: %lld", (long long)entrada->valor_constante.valor_int);
                     } else if (entrada->tipo == FLOAT) {
                         printf(", Valor: %.2f", entrada->valor_constante.valor_float);
                     } else if (entrada->tipo == STRING) {

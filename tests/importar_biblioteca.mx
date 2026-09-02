@@ -1,0 +1,5 @@
+Importar "biblioteca.mx";
+
+Entero resultado = duplicar(21);
+Flotante decimal = mitad(9.0);
+Mostrar(resultado, " ", decimal, "\n");

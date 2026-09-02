@@ -1,0 +1,7 @@
+Entero duplicar(Entero valor) {
+    Retornar valor + valor;
+}
+
+Flotante mitad(Flotante valor) {
+    Retornar valor / 2.0;
+}

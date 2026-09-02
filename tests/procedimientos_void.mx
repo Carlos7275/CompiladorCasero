@@ -1,0 +1,13 @@
+// Procedimientos Void y llamadas sin valor de retorno.
+
+Void separador() {
+    Mostrar("----------------\n");
+}
+
+Void mostrar_doble(Entero valor) {
+    Mostrar("Doble: ", valor * 2, "\n");
+}
+
+separador();
+mostrar_doble(21);
+separador();

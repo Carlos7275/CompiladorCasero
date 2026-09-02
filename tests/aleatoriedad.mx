@@ -1,0 +1,6 @@
+Entero dado = Aleatorio(10);
+Entero entre = AleatorioEntre(5, 9);
+
+Mostrar("0..9: ", dado, "\n");
+Mostrar("5..9: ", entre, "\n");
+Mostrar("sin limite: ", Aleatorio(), "\n");

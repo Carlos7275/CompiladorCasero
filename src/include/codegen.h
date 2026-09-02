@@ -29,6 +29,7 @@ typedef enum
 
     IR_PRINT,
     IR_READ,
+    IR_NATIVE_CALL,
     IR_HALT
 } IROperation;
 

@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdint.h>
+#include <inttypes.h>
 
 #include "parser.h"
 #include "symbols.h"
@@ -18,6 +20,10 @@ int next_label_number = 0;
 
 static TablaSimbolos *global_symbol_table_ref;
 static TablaSimbolos *ambito_actual = NULL;
+static ASTNode *program_root = NULL;
+static ASTNode *current_function = NULL;
+static char *current_return_value = NULL;
+static enum TipoDato current_return_type = TIPO_ERROR;
 
 #define MAX_LOOP_NESTING 100
 
@@ -78,10 +84,15 @@ static void generate_code_for_while_statement(ASTNode *while_node);
 static void generate_code_for_for_statement(ASTNode *for_node);
 static int es_entero(const char *s);
 static int es_flotante(const char *s);
+static char *new_float_temp(void);
+static int es_operando_flotante(const char *s);
+static void cargar_float_en_xmm(FILE *f, const char *operando, const char *registro);
 static int usar_temp(const char *temp, int desde);
 int es_literal(const char *s);
 int is_number(const char *s);
 int is_string_literal(const char *s);
+static int es_funcion_nativa(const char *nombre);
+static char *resolver_entorno(const char *operando);
 int is_valid_varname(const char *s);
 
 void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym_table)
@@ -93,6 +104,7 @@ void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym
     init_ir_generator();
     global_symbol_table_ref = global_sym_table;
     ambito_actual = global_sym_table;
+    program_root = root_ast_node;
 
     generate_code_for_node(root_ast_node);
     optimize_ir_code();
@@ -185,6 +197,20 @@ char *new_temp(void)
     return strdup(temp_name_buffer);
 }
 
+static char *new_float_temp(void)
+{
+    static char temp_name_buffer[32];
+    sprintf(temp_name_buffer, "f%d", next_temp_number++);
+    return strdup(temp_name_buffer);
+}
+
+static char *new_string_temp(void)
+{
+    static char temp_name_buffer[32];
+    sprintf(temp_name_buffer, "s%d", next_temp_number++);
+    return strdup(temp_name_buffer);
+}
+
 /**
  * Genera una etiqueta única para saltos y bifurcaciones del IR.
  *
@@ -234,6 +260,26 @@ static void generate_code_for_node(ASTNode *node)
     case AST_DECLARACION_VAR:
     case AST_DECLARACION_CONST:
         generate_code_for_declaration(node);
+        break;
+    case AST_DECLARACION_TIPO:
+        break;
+    case AST_FUNCION:
+        /* Functions are expanded at call sites by the compact backend. */
+        break;
+    case AST_RETORNAR_STMT:
+        if (node->hijo_izq) {
+            char *v = generate_code_for_expression(node->hijo_izq);
+            if (node->hijo_izq->resolved_type == STRING)
+                current_return_value = v;
+            else
+            {
+                emit_quad(IR_ASSIGN, v, NULL, "__return");
+                current_return_value = "__return";
+            }
+        }
+        break;
+    case AST_LLAMADA:
+        (void)generate_code_for_expression(node);
         break;
 
     case AST_ASIGNACION_STMT:
@@ -320,13 +366,17 @@ static char *generate_code_for_expression(ASTNode *expr_node)
     switch (expr_node->type)
     {
     case AST_LITERAL_ENTERO:
-        sprintf(buffer, "%d", (int)expr_node->valor.valor_numero);
+        snprintf(buffer, sizeof(buffer), "%" PRId64, expr_node->valor.valor_entero);
         result_name = strdup(buffer);
         break;
     case AST_LITERAL_FLOTANTE:
-        sprintf(buffer, "%f", expr_node->valor.valor_numero);
+    {
+        uint64_t bits;
+        memcpy(&bits, &expr_node->valor.valor_numero, sizeof(bits));
+        sprintf(buffer, "__float_%llx", (unsigned long long)bits);
         result_name = strdup(buffer);
         break;
+    }
     case AST_LITERAL_CADENA:
 
         result_name = strdup(expr_node->valor.valor_cadena);
@@ -335,6 +385,75 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         sprintf(buffer, "%d", expr_node->valor.valor_booleano ? 1 : 0);
         result_name = strdup(buffer);
         break;
+    case AST_LLAMADA:
+    {
+        const char *native = expr_node->hijo_izq->valor.nombre_id;
+        if (strcmp(native, "Entorno") == 0) {
+            result_name = resolver_entorno(expr_node->hijo_der
+                                               ? generate_code_for_expression(expr_node->hijo_der)
+                                               : "\"\"");
+            break;
+        }
+        if (strcmp(native, "ExisteEntorno") == 0) {
+            char *clave = expr_node->hijo_der
+                              ? generate_code_for_expression(expr_node->hijo_der)
+                              : strdup("\"\"");
+            char *valor = resolver_entorno(clave);
+            result_name = new_temp();
+            emit_quad(IR_ASSIGN, valor && strcmp(valor, "\"\"") != 0 ? "1" : "0", NULL, result_name);
+            free(clave);
+            free(valor);
+            break;
+        }
+        if (es_funcion_nativa(native)) {
+            char *values[4] = {0};
+            size_t len = 1;
+            int count = 0;
+            for (ASTNode *a = expr_node->hijo_der; a && count < 4; a = a->siguiente_hermano) {
+                values[count] = generate_code_for_expression(a);
+                len += strlen(values[count]) + 1;
+                count++;
+            }
+            char *args = calloc(len, 1);
+            for (int n = 0; n < count; n++) {
+                if (n > 0) strcat(args, "|");
+                strcat(args, values[n]);
+            }
+            result_name = (expr_node->resolved_type == FLOAT) ? new_float_temp() :
+                          (expr_node->resolved_type == STRING ? new_string_temp() : new_temp());
+            emit_quad(IR_NATIVE_CALL, native, args, result_name);
+            for (int n = 0; n < count; n++) free(values[n]);
+            free(args);
+            break;
+        }
+        ASTNode *fn = NULL, *c = program_root ? program_root->hijo_izq : NULL;
+        while (c) {
+            if (c->type == AST_FUNCION && c->hijo_izq &&
+                strcmp(c->hijo_izq->valor.nombre_id, expr_node->hijo_izq->valor.nombre_id) == 0) { fn = c; break; }
+            c = c->siguiente_hermano;
+        }
+        if (!fn) { result_name = strdup("0"); break; }
+        ASTNode *p = fn->parametros, *a = expr_node->hijo_der;
+        while (p && a) {
+            emit_quad(IR_ASSIGN, generate_code_for_expression(a), NULL, p->hijo_izq->valor.nombre_id);
+            p = p->siguiente_hermano; a = a->siguiente_hermano;
+        }
+        current_return_value = NULL;
+        enum TipoDato previous_return_type = current_return_type;
+        current_return_type = fn->return_type;
+        generate_code_for_node(fn->hijo_der);
+        current_return_type = previous_return_type;
+        if (current_return_value) {
+            if (fn->return_type == STRING)
+                result_name = strdup(current_return_value);
+            else
+            {
+                result_name = (fn->return_type == FLOAT) ? new_float_temp() : new_temp();
+                emit_quad(IR_ASSIGN, current_return_value, NULL, result_name);
+            }
+        } else result_name = strdup("0");
+        break;
+    }
     case AST_IDENTIFICADOR:
     {
 
@@ -342,8 +461,7 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         if (!symbol)
         {
 
-            fprintf(stderr, "Error at %d:%d: Error interno: Identificador '%s' no encontrado en la tabla de símbolos durante la generación de CI.\n", expr_node->renglon, expr_node->columna, expr_node->valor.nombre_id);
-            result_name = strdup("ERROR_VAR");
+            result_name = strdup(expr_node->valor.nombre_id);
         }
         else if (symbol->es_constante)
         {
@@ -351,11 +469,15 @@ static char *generate_code_for_expression(ASTNode *expr_node)
             switch (symbol->tipo)
             {
             case INT:
-                sprintf(buffer, "%d", symbol->valor_constante.valor_int);
+                snprintf(buffer, sizeof(buffer), "%" PRId64, symbol->valor_constante.valor_int);
                 break;
             case FLOAT:
-                sprintf(buffer, "%f", symbol->valor_constante.valor_float);
+            {
+                uint64_t bits;
+                memcpy(&bits, &symbol->valor_constante.valor_float, sizeof(bits));
+                sprintf(buffer, "__float_%llx", (unsigned long long)bits);
                 break;
+            }
             case STRING:
                 return strdup(symbol->valor_constante.valor_cadena);
             case BOOL:
@@ -379,7 +501,7 @@ static char *generate_code_for_expression(ASTNode *expr_node)
     case AST_NEGACION_UNARIA_EXPR:
     {
         char *operand_name = generate_code_for_expression(expr_node->hijo_izq);
-        char *temp = new_temp();
+        char *temp = (expr_node->resolved_type == FLOAT) ? new_float_temp() : new_temp();
         emit_quad(IR_NEG, operand_name, NULL, temp);
         result_name = temp;
         break;
@@ -409,7 +531,11 @@ static char *generate_code_for_expression(ASTNode *expr_node)
     {
         char *left_operand = generate_code_for_expression(expr_node->hijo_izq);
         char *right_operand = generate_code_for_expression(expr_node->hijo_der);
-        char *temp = new_temp();
+        char *temp = (expr_node->resolved_type == FLOAT ||
+                      es_operando_flotante(left_operand) ||
+                      es_operando_flotante(right_operand))
+                         ? new_float_temp()
+                         : new_temp();
 
         IROperation op_code;
         switch (expr_node->type)
@@ -513,6 +639,45 @@ static void generate_code_for_statement(ASTNode *stmt_node)
         fprintf(stderr, "Error at %d:%d: Error interno: Tipo de sentencia simple no manejado para CI.\n", stmt_node->renglon, stmt_node->columna);
         break;
     }
+}
+
+static int es_funcion_nativa(const char *nombre)
+{
+    static const char *nombres[] = {
+        "Abs", "Absoluto", "Min", "Max", "Potencia", "RaizCuadrada",
+        "Seno", "Coseno", "Tangente", "Logaritmo", "Exponencial",
+        "Piso", "Techo", "Redondear", "Longitud", "Comparar", "Contiene"
+        , "Aleatorio", "AleatorioEntre", "Entorno", "ExisteEntorno",
+        "Http", "HttpCuerpo", "HttpCabeceras"
+    };
+    for (size_t i = 0; i < sizeof(nombres) / sizeof(nombres[0]); i++)
+        if (strcmp(nombre, nombres[i]) == 0) return 1;
+    return 0;
+}
+
+static char *resolver_entorno(const char *operando)
+{
+    if (!operando || strlen(operando) < 2 ||
+        operando[0] != '"' || operando[strlen(operando) - 1] != '"')
+        return strdup("\"\"");
+    size_t key_len = strlen(operando) - 2;
+    char *key = malloc(key_len + 1);
+    memcpy(key, operando + 1, key_len);
+    key[key_len] = '\0';
+    const char *value = getenv(key);
+    free(key);
+    if (!value) return strdup("\"\"");
+
+    char *result = malloc(strlen(value) * 2 + 3);
+    size_t j = 0;
+    result[j++] = '"';
+    for (size_t i = 0; value[i] != '\0'; i++) {
+        if (value[i] == '"' || value[i] == '\\') result[j++] = '\\';
+        result[j++] = value[i];
+    }
+    result[j++] = '"';
+    result[j] = '\0';
+    return result;
 }
 
 static void generate_code_for_declaration(ASTNode *decl_node)
@@ -741,6 +906,9 @@ void imprimir_codigo_intermedio(void)
         case IR_READ:
             printf("READ");
             break;
+        case IR_NATIVE_CALL:
+            printf("NATIVE_CALL");
+            break;
         case IR_HALT:
             printf("HALT");
             break;
@@ -783,7 +951,34 @@ static int es_flotante(const char *s)
         else if (!isdigit(s[i]) && !(i == 0 && s[i] == '-'))
             return 0;
     }
+
     return punto == 1;
+}
+
+static int es_operando_flotante(const char *s)
+{
+    if (!s)
+        return 0;
+    if (strncmp(s, "__float_", 8) == 0 || s[0] == 'f' ||
+        (strcmp(s, "__return") == 0 && current_return_type == FLOAT))
+        return 1;
+    EntradaSimbolo *entry = buscar_simbolo_ambitos(ambito_actual, s);
+    return entry != NULL && entry->tipo == FLOAT;
+}
+
+static void cargar_float_en_xmm(FILE *f, const char *operando, const char *registro)
+{
+    if (strncmp(operando, "__float_", 8) == 0)
+    {
+        unsigned long long bits = 0;
+        sscanf(operando + 8, "%llx", &bits);
+        fprintf(f, "    mov rax, 0x%llx\n    movq %s, rax\n",
+                bits, registro);
+    }
+    else
+    {
+        fprintf(f, "    movsd %s, qword [rel %s]\n", registro, operando);
+    }
 }
 
 static int usar_temp(const char *temp, int desde)
@@ -1137,6 +1332,8 @@ void print_asm_string_literal(FILE *f, const char *str)
 
     if (in_quotes)
         fprintf(f, "\"");
+    else if (first)
+        fprintf(f, "\"\"");
 }
 
 const char *strip_quotes(const char *s)
@@ -1155,12 +1352,102 @@ void generate_asm(FILE *f)
 {
     char declared_vars[MAX_BUFFER][64];
     int declared_vars_count = 0;
+    int uses_print = 0;
+    int uses_read = 0;
+    int uses_float_print = 0;
+    int uses_string_print = 0;
+    int uses_int_print = 0;
+    int uses_float_read = 0;
+    int uses_string_read = 0;
+    int uses_int_read = 0;
+    int uses_strlen = 0;
+    int uses_strcmp = 0;
+    int uses_strstr = 0;
+    int uses_sqrt = 0;
+    int uses_sin = 0;
+    int uses_cos = 0;
+    int uses_tan = 0;
+    int uses_log = 0;
+    int uses_exp = 0;
+    int uses_floor = 0;
+    int uses_ceil = 0;
+    int uses_pow = 0;
+    int uses_round = 0;
+    int uses_rand = 0;
+    int uses_http_request = 0;
+    int uses_http_body = 0;
+    int uses_http_headers = 0;
     const char *data_section = "section .data\n";
     const char *bss_section = "section .bss\n";
     const char *text_section = "section .text\n";
     const char *printf_sym = "printf";
     const char *scanf_sym = "scanf";
     const char *main_sym = "main";
+
+    for (int i = 0; i < ir_current_size; i++)
+    {
+        Quadruple *q = &ir_code[i];
+        if (q->op == IR_PRINT)
+        {
+            uses_print = 1;
+            if (is_string_literal(q->arg1))
+                uses_string_print = 1;
+            else if (es_operando_flotante(q->arg1))
+                uses_float_print = 1;
+            else
+                uses_int_print = 1;
+        }
+        else if (q->op == IR_READ)
+        {
+            uses_read = 1;
+            EntradaSimbolo *entry = buscar_simbolo_ambitos(ambito_actual, q->result);
+            if (entry != NULL && entry->tipo == STRING)
+                uses_string_read = 1;
+            else if (entry != NULL && entry->tipo == FLOAT)
+                uses_float_read = 1;
+            else
+                uses_int_read = 1;
+        }
+        else if (q->op == IR_NATIVE_CALL)
+        {
+            const char *native = q->arg1;
+            if (strcmp(native, "Longitud") == 0)
+                uses_strlen = 1;
+            else if (strcmp(native, "Comparar") == 0)
+                uses_strcmp = 1;
+            else if (strcmp(native, "Contiene") == 0)
+                uses_strstr = 1;
+            else if (strcmp(native, "Potencia") == 0)
+                uses_pow = 1;
+            else if (strcmp(native, "RaizCuadrada") == 0)
+                uses_sqrt = 1;
+            else if (strcmp(native, "Seno") == 0)
+                uses_sin = 1;
+            else if (strcmp(native, "Coseno") == 0)
+                uses_cos = 1;
+            else if (strcmp(native, "Tangente") == 0)
+                uses_tan = 1;
+            else if (strcmp(native, "Logaritmo") == 0)
+                uses_log = 1;
+            else if (strcmp(native, "Exponencial") == 0)
+                uses_exp = 1;
+            else if (strcmp(native, "Piso") == 0)
+                uses_floor = 1;
+            else if (strcmp(native, "Techo") == 0)
+                uses_ceil = 1;
+            else if (strcmp(native, "Redondear") == 0)
+                uses_round = 1;
+            else if (strcmp(native, "Aleatorio") == 0 ||
+                     strcmp(native, "AleatorioEntre") == 0)
+                uses_rand = 1;
+            else if (strcmp(native, "Http") == 0)
+                uses_http_request = 1;
+            else if (strcmp(native, "HttpCuerpo") == 0)
+                uses_http_body = 1;
+            else if (strcmp(native, "HttpCabeceras") == 0)
+                uses_http_headers = 1;
+        }
+    }
 
 #if defined(__APPLE__)
     data_section = "section __DATA,__data\n";
@@ -1173,12 +1460,12 @@ void generate_asm(FILE *f)
 
     // Sección .data con formatos
     fprintf(f, "%s", data_section);
-    fprintf(f, "fmt_int db \"%%ld\", 0\n");
-    fprintf(f, "fmt_float db \"%%lf\", 10, 0\n");
-    fprintf(f, "fmt_str db \"%%s\", 0\n");
-    fprintf(f, "fmt_read_int db \"%%ld\", 0\n");
-    fprintf(f, "fmt_read_float db \"%%lf\", 0\n");
-    fprintf(f, "fmt_read_str db \"%%255s\", 0\n");
+    if (uses_int_print) fprintf(f, "fmt_int db \"%%lld\", 0\n");
+    if (uses_float_print) fprintf(f, "fmt_float db \"%%f\", 0\n");
+    if (uses_string_print) fprintf(f, "fmt_str db \"%%s\", 0\n");
+    if (uses_int_read) fprintf(f, "fmt_read_int db \"%%lld\", 0\n");
+    if (uses_float_read) fprintf(f, "fmt_read_float db \"%%lf\", 0\n");
+    if (uses_string_read) fprintf(f, "fmt_read_str db \"%%255s\", 0\n");
 
     // Literales string (buscar en todas las operaciones)
     for (int i = 0; i < ir_current_size; i++)
@@ -1197,6 +1484,21 @@ void generate_asm(FILE *f)
             print_asm_string_literal(f, strip_quotes(q->arg2));
             fprintf(f, ", 0\n");
         }
+        if (q->op == IR_NATIVE_CALL && q->arg2) {
+            char args[512];
+            snprintf(args, sizeof(args), "%s", q->arg2);
+            char *arg = strtok(args, "|");
+            int arg_index = 0;
+            while (arg) {
+                if (is_string_literal(arg)) {
+                    fprintf(f, "str_native_%d_%d db ", i, arg_index);
+                    print_asm_string_literal(f, strip_quotes(arg));
+                    fprintf(f, ", 0\n");
+                }
+                arg = strtok(NULL, "|");
+                arg_index++;
+            }
+        }
     }
 
     // Variables en .bss
@@ -1204,7 +1506,10 @@ void generate_asm(FILE *f)
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
-        const char *args[] = {q->arg1, q->arg2, q->result};
+        const char *args[] = {
+            q->op == IR_NATIVE_CALL ? NULL : q->arg1,
+            q->arg2, q->result
+        };
         for (int j = 0; j < 3; j++)
         {
             const char *var = args[j];
@@ -1221,13 +1526,58 @@ void generate_asm(FILE *f)
                 }
             }
         }
+        if (q->op == IR_NATIVE_CALL && q->arg2) {
+            char native_args[512];
+            snprintf(native_args, sizeof(native_args), "%s", q->arg2);
+            char *arg = strtok(native_args, "|");
+            while (arg) {
+                if (is_valid_varname(arg) &&
+                    !var_declared(declared_vars, declared_vars_count, arg)) {
+                    strcpy(declared_vars[declared_vars_count++], arg);
+                    EntradaSimbolo *entry = buscar_simbolo(ambito_actual, arg);
+                    if (entry && entry->tipo == STRING)
+                        fprintf(f, "    %s resb 256\n", arg);
+                    else
+                        fprintf(f, "    %s resq 1\n", arg);
+                }
+                arg = strtok(NULL, "|");
+            }
+        }
     }
 
     // Código principal
     fprintf(f, "%s", text_section);
     fprintf(f, "global %s\n", main_sym);
-    fprintf(f, "extern %s\n", printf_sym);
-    fprintf(f, "extern %s\n", scanf_sym);
+    if (uses_print) fprintf(f, "extern %s\n", printf_sym);
+    if (uses_read) fprintf(f, "extern %s\n", scanf_sym);
+    {
+        const char *native_prefix =
+#if defined(__APPLE__)
+            "_";
+#else
+            "";
+#endif
+        if (uses_strlen) fprintf(f, "extern %sstrlen\n", native_prefix);
+        if (uses_strcmp) fprintf(f, "extern %sstrcmp\n", native_prefix);
+        if (uses_strstr) fprintf(f, "extern %sstrstr\n", native_prefix);
+        if (uses_sqrt) fprintf(f, "extern %ssqrt\n", native_prefix);
+        if (uses_sin) fprintf(f, "extern %ssin\n", native_prefix);
+        if (uses_cos) fprintf(f, "extern %scos\n", native_prefix);
+        if (uses_tan) fprintf(f, "extern %stan\n", native_prefix);
+        if (uses_log) fprintf(f, "extern %slog\n", native_prefix);
+        if (uses_exp) fprintf(f, "extern %sexp\n", native_prefix);
+        if (uses_floor) fprintf(f, "extern %sfloor\n", native_prefix);
+        if (uses_ceil) fprintf(f, "extern %sceil\n", native_prefix);
+        if (uses_pow) fprintf(f, "extern %spow\n", native_prefix);
+        if (uses_round) fprintf(f, "extern %sround\n", native_prefix);
+        if (uses_rand) fprintf(f, "extern %srand\n", native_prefix);
+        if (uses_http_request)
+            fprintf(f, "extern %smx_http_request\n", native_prefix);
+        if (uses_http_body)
+            fprintf(f, "extern %smx_http_body\n", native_prefix);
+        if (uses_http_headers)
+            fprintf(f, "extern %smx_http_headers\n", native_prefix);
+    }
 
     fprintf(f, "%s:\n", main_sym);
     fprintf(f, "    push rbp\n");
@@ -1246,7 +1596,12 @@ void generate_asm(FILE *f)
         switch (q->op)
         {
         case IR_ASSIGN:
-            if (is_number(q->arg1))
+            if (es_operando_flotante(q->arg1))
+            {
+                cargar_float_en_xmm(f, q->arg1, "xmm0");
+                fprintf(f, "    movsd [rel %s], xmm0\n", q->result);
+            }
+            else if (is_number(q->arg1))
             {
                 fprintf(f, "    mov rax, %s\n    mov [rel %s], rax\n", q->arg1, q->result);
             }
@@ -1274,6 +1629,22 @@ void generate_asm(FILE *f)
                     fprintf(f, "    lea rax, [rel str_%d]\n    mov [rel %s], rax\n", i, q->result);
                 }
             }
+            else if (q->arg1[0] == 's' && isdigit((unsigned char)q->arg1[1]) &&
+                     buscar_simbolo(ambito_actual, q->result) != NULL &&
+                     buscar_simbolo(ambito_actual, q->result)->tipo == STRING)
+            {
+                fprintf(f,
+                    "    mov rsi, [rel %s]\n"
+                    "    lea rdi, [rel %s]\n"
+                    "    xor rcx, rcx\n"
+                    ".copy_native_str_%d:\n"
+                    "    mov al, [rsi + rcx]\n"
+                    "    mov [rdi + rcx], al\n"
+                    "    inc rcx\n"
+                    "    test al, al\n"
+                    "    jnz .copy_native_str_%d\n",
+                    q->arg1, q->result, i, i);
+            }
             else
             {
                 fprintf(f, "    mov rax, [rel %s]\n    mov [rel %s], rax\n", q->arg1, q->result);
@@ -1286,6 +1657,22 @@ void generate_asm(FILE *f)
         case IR_DIV:
         case IR_MOD:
         {
+            if (es_operando_flotante(q->arg1) || es_operando_flotante(q->arg2))
+            {
+                if (q->op == IR_MOD)
+                {
+                    fprintf(stderr, "Error: el operador %% no admite operandos flotantes.\n");
+                    exit(EXIT_FAILURE);
+                }
+                cargar_float_en_xmm(f, q->arg1, "xmm0");
+                cargar_float_en_xmm(f, q->arg2, "xmm1");
+                if (q->op == IR_ADD) fprintf(f, "    addsd xmm0, xmm1\n");
+                else if (q->op == IR_SUB) fprintf(f, "    subsd xmm0, xmm1\n");
+                else if (q->op == IR_MUL) fprintf(f, "    mulsd xmm0, xmm1\n");
+                else fprintf(f, "    divsd xmm0, xmm1\n");
+                fprintf(f, "    movsd [rel %s], xmm0\n", q->result);
+                break;
+            }
             const char *op;
             if (q->op == IR_ADD) op = "add";
             else if (q->op == IR_SUB) op = "sub";
@@ -1331,6 +1718,13 @@ void generate_asm(FILE *f)
         }
 
         case IR_NEG:
+            if (es_operando_flotante(q->arg1))
+            {
+                fprintf(f, "    pxor xmm1, xmm1\n");
+                cargar_float_en_xmm(f, q->arg1, "xmm0");
+                fprintf(f, "    subsd xmm1, xmm0\n    movsd [rel %s], xmm1\n", q->result);
+                break;
+            }
             if (es_literal(q->arg1))
                 fprintf(f, "    mov rax, %s\n", q->arg1);
             else
@@ -1356,6 +1750,26 @@ void generate_asm(FILE *f)
             case IR_EQ: cond = "e"; break;
             case IR_NE: cond = "ne"; break;
             default: cond = "e"; break;
+            }
+
+            if (es_operando_flotante(q->arg1) || es_operando_flotante(q->arg2))
+            {
+                const char *float_cond;
+                switch (q->op)
+                {
+                case IR_LT: float_cond = "b"; break;
+                case IR_GT: float_cond = "a"; break;
+                case IR_LE: float_cond = "be"; break;
+                case IR_GE: float_cond = "ae"; break;
+                case IR_EQ: float_cond = "e"; break;
+                default: float_cond = "ne"; break;
+                }
+                cargar_float_en_xmm(f, q->arg1, "xmm0");
+                cargar_float_en_xmm(f, q->arg2, "xmm1");
+                fprintf(f, "    ucomisd xmm0, xmm1\n    set%s al\n"
+                           "    movzx rax, al\n    mov [rel %s], rax\n",
+                        float_cond, q->result);
+                break;
             }
 
             if (is_number(q->arg2))
@@ -1417,6 +1831,14 @@ void generate_asm(FILE *f)
                     "    call %s\n",
                     q->arg1, printf_sym);
             }
+            else if (es_operando_flotante(q->arg1))
+            {
+                cargar_float_en_xmm(f, q->arg1, "xmm0");
+                fprintf(f,
+                    "    lea rcx, [rel fmt_float]\n"
+                    "    mov eax, 1\n"
+                    "    call %s\n", printf_sym);
+            }
             else if (entry != NULL)
             {
                 if (entry->tipo == STRING)
@@ -1451,8 +1873,8 @@ void generate_asm(FILE *f)
             if (is_string_literal(q->arg1))
             {
                 fprintf(f,
-                    "    lea rdi, [rel str_%d]\n"
-                    "    lea rsi, [rel fmt_str]\n"
+                    "    lea rdi, [rel fmt_str]\n"
+                    "    lea rsi, [rel str_%d]\n"
                     "    xor eax, eax\n"
                     "    call %s\n",
                     i, printf_sym);
@@ -1466,13 +1888,22 @@ void generate_asm(FILE *f)
                     "    call %s\n",
                     q->arg1, printf_sym);
             }
+            else if (es_operando_flotante(q->arg1))
+            {
+                cargar_float_en_xmm(f, q->arg1, "xmm0");
+                fprintf(f,
+                    "    lea rdi, [rel fmt_float]\n"
+                    "    mov eax, 1\n"
+                    "    call %s\n",
+                    printf_sym);
+            }
             else if (entry != NULL)
             {
                 if (entry->tipo == STRING)
                 {
                     fprintf(f,
-                        "    lea rdi, [rel %s]\n"
-                        "    lea rsi, [rel fmt_str]\n"
+                        "    lea rdi, [rel fmt_str]\n"
+                        "    lea rsi, [rel %s]\n"
                         "    xor eax, eax\n"
                         "    call %s\n",
                         q->arg1, printf_sym);
@@ -1496,7 +1927,125 @@ void generate_asm(FILE *f)
                         q->arg1, printf_sym);
                 }
             }
+            else if (q->arg1[0] == 's' && isdigit((unsigned char)q->arg1[1]))
+            {
+                fprintf(f,
+                    "    mov rsi, [rel %s]\n"
+                    "    lea rdi, [rel fmt_str]\n"
+                    "    xor eax, eax\n"
+                    "    call %s\n", q->arg1, printf_sym);
+            }
+            else
+            {
+                fprintf(f,
+                        "    mov rsi, [rel %s]\n"
+                        "    lea rdi, [rel fmt_int]\n"
+                        "    xor eax, eax\n"
+                        "    call %s\n", q->arg1, printf_sym);
+            }
 #endif
+            break;
+        }
+
+        case IR_NATIVE_CALL:
+        {
+            const char *native_prefix =
+#if defined(__APPLE__)
+                "_";
+#else
+                "";
+#endif
+            char args[512];
+            snprintf(args, sizeof(args), "%s", q->arg2 ? q->arg2 : "");
+            char *first = strtok(args, "|");
+            char *second = strtok(NULL, "|");
+            char *third = strtok(NULL, "|");
+            char *fourth = strtok(NULL, "|");
+            int is_string = strcmp(q->arg1, "Longitud") == 0 ||
+                            strcmp(q->arg1, "Comparar") == 0 ||
+                            strcmp(q->arg1, "Contiene") == 0;
+            if (strcmp(q->arg1, "Http") == 0) {
+                char *http_args[] = {first, second, third, fourth};
+                const char *registers[] = {"rdi", "rsi", "rdx", "rcx"};
+                for (int n = 0; n < 4; n++) {
+                    if (!http_args[n])
+                        fprintf(f, "    xor %s, %s\n", registers[n], registers[n]);
+                    else if (is_string_literal(http_args[n]))
+                        fprintf(f, "    lea %s, [rel str_native_%d_%d]\n", registers[n], i, n);
+                    else
+                        fprintf(f, "    lea %s, [rel %s]\n", registers[n], http_args[n]);
+                }
+                fprintf(f, "    call %smx_http_request\n    mov [rel %s], rax\n",
+                        native_prefix, q->result);
+            } else if (strcmp(q->arg1, "HttpCuerpo") == 0) {
+                fprintf(f, "    call %smx_http_body\n    mov [rel %s], rax\n",
+                        native_prefix, q->result);
+            } else if (strcmp(q->arg1, "HttpCabeceras") == 0) {
+                fprintf(f, "    call %smx_http_headers\n    mov [rel %s], rax\n",
+                        native_prefix, q->result);
+            } else if (strcmp(q->arg1, "Aleatorio") == 0 || strcmp(q->arg1, "AleatorioEntre") == 0) {
+                fprintf(f, "    call %srand\n", native_prefix);
+                fprintf(f, "    movsxd rax, eax\n");
+                if (strcmp(q->arg1, "Aleatorio") == 0 && first) {
+                    if (is_number(first)) fprintf(f, "    mov rcx, %s\n", first);
+                    else fprintf(f, "    mov rcx, [rel %s]\n", first);
+                    fprintf(f, "    xor rdx, rdx\n    div rcx\n    mov rax, rdx\n");
+                } else if (strcmp(q->arg1, "AleatorioEntre") == 0) {
+                    if (is_number(first)) fprintf(f, "    mov rcx, %s\n", first);
+                    else fprintf(f, "    mov rcx, [rel %s]\n", first);
+                    if (is_number(second)) fprintf(f, "    mov r8, %s\n", second);
+                    else fprintf(f, "    mov r8, [rel %s]\n", second);
+                    fprintf(f, "    sub r8, rcx\n    inc r8\n    xor rdx, rdx\n    div r8\n    add rdx, rcx\n    mov rax, rdx\n");
+                }
+                fprintf(f, "    mov [rel %s], rax\n", q->result);
+            } else if (is_string) {
+                if (is_string_literal(first))
+                    fprintf(f, "    lea rdi, [rel str_native_%d_0]\n", i);
+                else
+                    fprintf(f, "    lea rdi, [rel %s]\n", first);
+                if (second) {
+                    if (is_string_literal(second))
+                        fprintf(f, "    lea rsi, [rel str_native_%d_1]\n", i);
+                    else
+                        fprintf(f, "    lea rsi, [rel %s]\n", second);
+                }
+                fprintf(f, "    call %s%s\n", native_prefix,
+                        strcmp(q->arg1, "Longitud") == 0 ? "strlen" :
+                        strcmp(q->arg1, "Comparar") == 0 ? "strcmp" : "strstr"
+                );
+                if (strcmp(q->arg1, "Contiene") == 0) {
+                    fprintf(f, "    test rax, rax\n    setne al\n    movzx rax, al\n");
+                }
+                fprintf(f, "    mov [rel %s], rax\n", q->result);
+            } else if (strcmp(q->arg1, "Abs") == 0 || strcmp(q->arg1, "Absoluto") == 0) {
+                if (is_number(first)) fprintf(f, "    mov rax, %s\n", first);
+                else fprintf(f, "    mov rax, [rel %s]\n", first);
+                fprintf(f, "    cqo\n    xor rax, rdx\n    sub rax, rdx\n    mov [rel %s], rax\n", q->result);
+            } else if (strcmp(q->arg1, "Min") == 0 || strcmp(q->arg1, "Max") == 0) {
+                if (is_number(first)) fprintf(f, "    mov rax, %s\n", first);
+                else fprintf(f, "    mov rax, [rel %s]\n", first);
+                if (is_number(second)) fprintf(f, "    mov rcx, %s\n", second);
+                else fprintf(f, "    mov rcx, [rel %s]\n", second);
+                fprintf(f, "    cmp rax, rcx\n");
+                fprintf(f, "    cmov%s rax, rcx\n    mov [rel %s], rax\n",
+                        strcmp(q->arg1, "Min") == 0 ? "g" : "l", q->result);
+            } else {
+                const char *symbol = strcmp(q->arg1, "Potencia") == 0 ? "pow" :
+                    strcmp(q->arg1, "RaizCuadrada") == 0 ? "sqrt" :
+                    strcmp(q->arg1, "Seno") == 0 ? "sin" :
+                    strcmp(q->arg1, "Coseno") == 0 ? "cos" :
+                    strcmp(q->arg1, "Tangente") == 0 ? "tan" :
+                    strcmp(q->arg1, "Logaritmo") == 0 ? "log" :
+                    strcmp(q->arg1, "Exponencial") == 0 ? "exp" :
+                    strcmp(q->arg1, "Piso") == 0 ? "floor" :
+                    strcmp(q->arg1, "Techo") == 0 ? "ceil" : "round";
+                cargar_float_en_xmm(f, first, "xmm0");
+                if (second) cargar_float_en_xmm(f, second, "xmm1");
+                fprintf(f, "    call %s%s\n", native_prefix, symbol);
+                if (strcmp(q->arg1, "Redondear") == 0) {
+                    fprintf(f, "    cvttsd2si rax, xmm0\n    mov [rel %s], rax\n", q->result);
+                } else fprintf(f, "    movsd [rel %s], xmm0\n", q->result);
+            }
             break;
         }
 

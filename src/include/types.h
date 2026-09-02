@@ -60,6 +60,7 @@ struct ErrorSemantico
 };
 
 void Insertar(struct Token token);
+void reiniciar_tokens(void);
 void generarToken(int tipoToken, const char *lexema, int tipoDato, int Col, int Renglon);
 void imprimir_lexico(struct nodo *Nodo);
 #endif
