@@ -15,7 +15,7 @@ struct nodo *token_actual_parser;
 /**
  * Inicializa el parser apuntando al primer token del flujo de entrada.
  */
-void iniciarParser()
+void iniciarParser(void)
 {
     token_actual_parser = raiz;
 }
@@ -25,7 +25,7 @@ void iniciarParser()
  *
  * @return Token visible actual o NULL si no hay más elementos.
  */
-struct Token *peekToken()
+struct Token *peekToken(void)
 {
     if (token_actual_parser != NULL)
     {
@@ -39,7 +39,7 @@ struct Token *peekToken()
  *
  * @return Token consumido o NULL si no existe.
  */
-struct Token *consumirToken()
+struct Token *consumirToken(void)
 {
     if (token_actual_parser != NULL)
     {
@@ -161,7 +161,7 @@ void liberar_ast(ASTNode *node)
  *
  * @return Nodo raíz del programa.
  */
-ASTNode *parsePrograma()
+ASTNode *parsePrograma(void)
 {
     iniciarParser();
     ASTNode *programa_node = crearNodoAST(AST_PROGRAMA, 1, 1);
@@ -174,7 +174,7 @@ ASTNode *parsePrograma()
  *
  * @return Lista enlazada de nodos que representan sentencias.
  */
-ASTNode *parseListaSentencias()
+ASTNode *parseListaSentencias(void)
 {
     ASTNode *head = NULL;
     ASTNode *tail = NULL;
@@ -220,7 +220,7 @@ ASTNode *parseListaSentencias()
  *
  * @return Nodo sintáctico asociado a la sentencia detectada.
  */
-ASTNode *parseSentenciaODeclaracion()
+ASTNode *parseSentenciaODeclaracion(void)
 {
     ASTNode *node = NULL;
     struct Token *token_inicio_sentencia = peekToken();
@@ -419,7 +419,7 @@ ASTNode *parseSentenciaODeclaracion()
     return node;
 }
 
-ASTNode *parseDeclaracion()
+ASTNode *parseDeclaracion(void)
 {
     struct Token *tipo_token_consumido = consumirToken();
     int renglon = tipo_token_consumido->Renglon;
@@ -546,7 +546,7 @@ ASTNode *parseDeclaracion()
     return declaracion_node;
 }
 
-ASTNode *parseDeclaracionConstante()
+ASTNode *parseDeclaracionConstante(void)
 {
     struct Token *const_token = consumirToken();
     int renglon = const_token->Renglon;
@@ -619,12 +619,12 @@ ASTNode *parseDeclaracionConstante()
     else
     {
         fprintf(stderr, "Error interno: Tipo de dato '%s' no reconocido en declaración de constante.\n", tipo_token_consumido->Lexema);
-        const_decl_node->declared_type_info = DESCONOCIDO;
+        const_decl_node->declared_type_info = TIPO_ERROR;
     }
 
     return const_decl_node;
 }
-ASTNode *parseAsignacion()
+ASTNode *parseAsignacion(void)
 {
     struct Token *id_token = peekToken();
     match(ID, NULL);
@@ -716,7 +716,7 @@ ASTNode *parseAsignacion()
 }
 
 
-ASTNode *parseUpdateStatement()
+ASTNode *parseUpdateStatement(void)
 {
     ASTNode *stmt_node = NULL;
     struct Token *first_token = peekToken();
@@ -786,7 +786,7 @@ ASTNode *parseUpdateStatement()
     return NULL;
 }
 
-ASTNode *parseMostrarStmt()
+ASTNode *parseMostrarStmt(void)
 {
     struct Token *mostrar_token = consumirToken();
     int renglon = mostrar_token->Renglon;
@@ -828,7 +828,7 @@ ASTNode *parseMostrarStmt()
 
     return mostrar_node;
 }
-ASTNode *parseLeerStmt()
+ASTNode *parseLeerStmt(void)
 {
     struct Token *mostrar_token = consumirToken();
     int renglon = mostrar_token->Renglon;
@@ -849,7 +849,7 @@ ASTNode *parseLeerStmt()
     return mostrar_node;
 }
 
-ASTNode *parseBloqueSentencias()
+ASTNode *parseBloqueSentencias(void)
 {
     ASTNode *block_node = crearNodoAST(AST_BLOQUE,
                                        peekToken() ? peekToken()->Renglon : 0,
@@ -858,13 +858,13 @@ ASTNode *parseBloqueSentencias()
     return block_node;
 }
 
-ASTNode *parseExpresion()
+ASTNode *parseExpresion(void)
 {
     ASTNode *expr = parseExpresionOR();
     return expr;
 }
 
-ASTNode *parseExpresionOR()
+ASTNode *parseExpresionOR(void)
 {
     ASTNode *left_expr = parseExpresionAND();
 
@@ -888,7 +888,7 @@ ASTNode *parseExpresionOR()
     return left_expr;
 }
 
-ASTNode *parseExpresionAND()
+ASTNode *parseExpresionAND(void)
 {
     ASTNode *left_expr = parseExpresionNOT();
 
@@ -912,7 +912,7 @@ ASTNode *parseExpresionAND()
     return left_expr;
 }
 
-ASTNode *parseExpresionNOT()
+ASTNode *parseExpresionNOT(void)
 {
     struct Token *current_token = peekToken();
     if (current_token != NULL && current_token->TipoToken == PalRes && strcmp(current_token->Lexema, "!") == 0)
@@ -932,7 +932,7 @@ ASTNode *parseExpresionNOT()
     return parseExpresionComparacion();
 }
 
-ASTNode *parseExpresionComparacion()
+ASTNode *parseExpresionComparacion(void)
 {
     ASTNode *left_expr = parseExpresionAritmetica();
 
@@ -985,7 +985,7 @@ ASTNode *parseExpresionComparacion()
     return left_expr;
 }
 
-ASTNode *parseExpresionAritmetica()
+ASTNode *parseExpresionAritmetica(void)
 {
     ASTNode *expr_node = parseTermino();
 
@@ -1021,7 +1021,7 @@ ASTNode *parseExpresionAritmetica()
     return expr_node;
 }
 
-ASTNode *parseTermino()
+ASTNode *parseTermino(void)
 {
     ASTNode *term_node = parseFactor();
 
@@ -1061,7 +1061,7 @@ ASTNode *parseTermino()
     }
     return term_node;
 }
-ASTNode *parseFactor()
+ASTNode *parseFactor(void)
 {
     struct Token *current_token = peekToken();
     ASTNode *node = NULL;
@@ -1229,7 +1229,7 @@ ASTNode *parseFactor()
     return node;
 }
 
-ASTNode *parseSentenciaCondicional()
+ASTNode *parseSentenciaCondicional(void)
 {
     struct Token *si_token = consumirToken();
     int renglon = si_token->Renglon;
@@ -1332,7 +1332,7 @@ ASTNode *parseSentenciaCondicional()
 
     return if_node;
 }
-ASTNode *parseSentenciaBucleMientras()
+ASTNode *parseSentenciaBucleMientras(void)
 {
     struct Token *mientras_token = consumirToken();
     int renglon = mientras_token->Renglon;
@@ -1366,7 +1366,7 @@ ASTNode *parseSentenciaBucleMientras()
 
     return mientras_node;
 }
-ASTNode *parseSentenciaBuclePara()
+ASTNode *parseSentenciaBuclePara(void)
 {
     struct Token *para_token = consumirToken();
     int renglon = para_token->Renglon;

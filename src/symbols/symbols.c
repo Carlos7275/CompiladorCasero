@@ -107,6 +107,9 @@ void destruir_jerarquia_tablas_simbolos(TablaSimbolos *tabla) {
  * @return Entrada del símbolo creada o NULL si ya existe en el mismo ámbito.
  */
 EntradaSimbolo *agregar_simbolo(TablaSimbolos *tabla, const char *nombre, enum TipoDato tipo, int renglon, int columna) {
+    (void)renglon;
+    (void)columna;
+
     if (tabla == NULL || nombre == NULL) {
         return NULL;
     }

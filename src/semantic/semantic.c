@@ -29,31 +29,31 @@ typedef struct
 } FuncionNativa;
 
 static const FuncionNativa funciones_nativas[] = {
-    {"Abs", INT, INT, TIPO_ERROR, 1},
-    {"Absoluto", INT, INT, TIPO_ERROR, 1},
-    {"Min", INT, INT, INT, 2},
-    {"Max", INT, INT, INT, 2},
-    {"Potencia", FLOAT, FLOAT, FLOAT, 2},
-    {"RaizCuadrada", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Seno", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Coseno", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Tangente", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Logaritmo", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Exponencial", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Piso", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Techo", FLOAT, FLOAT, TIPO_ERROR, 1},
-    {"Redondear", INT, FLOAT, TIPO_ERROR, 1},
-    {"Longitud", INT, STRING, TIPO_ERROR, 1},
-    {"Comparar", INT, STRING, STRING, 2},
-    {"Contiene", BOOL, STRING, STRING, 2},
-    {"Aleatorio", INT, TIPO_ERROR, TIPO_ERROR, 0},
-    {"Aleatorio", INT, INT, TIPO_ERROR, 1},
-    {"AleatorioEntre", INT, INT, INT, 2},
-    {"Entorno", STRING, STRING, TIPO_ERROR, 1},
-    {"ExisteEntorno", BOOL, STRING, TIPO_ERROR, 1},
     {"Http", INT, STRING, STRING, 4, STRING, STRING},
-    {"HttpCuerpo", STRING, TIPO_ERROR, TIPO_ERROR, 0},
-    {"HttpCabeceras", STRING, TIPO_ERROR, TIPO_ERROR, 0}
+    {"Abs", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Absoluto", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Min", INT, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"Max", INT, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"Potencia", FLOAT, FLOAT, FLOAT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"RaizCuadrada", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Seno", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Coseno", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Tangente", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Logaritmo", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Exponencial", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Piso", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Techo", FLOAT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Redondear", INT, FLOAT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Longitud", INT, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"Comparar", INT, STRING, STRING, 2, TIPO_ERROR, TIPO_ERROR},
+    {"Contiene", BOOL, STRING, STRING, 2, TIPO_ERROR, TIPO_ERROR},
+    {"Aleatorio", INT, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
+    {"Aleatorio", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"AleatorioEntre", INT, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"Entorno", STRING, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"ExisteEntorno", BOOL, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"HttpCuerpo", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
+    {"HttpCabeceras", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR}
 };
 
 static const FuncionNativa *buscar_funcion_nativa(const char *nombre, int argumentos)
@@ -108,7 +108,7 @@ void reportar_error_semantico(int renglon, int columna, const char *formato, ...
 /**
  * Muestra los errores semánticos ordenados por posición en el archivo fuente.
  */
-void imprimir_errores_semanticos()
+void imprimir_errores_semanticos(void)
 {
     if (cabeza_errores == NULL)
     {
@@ -392,7 +392,7 @@ TablaSimbolos *realizar_analisis_semantico(ASTNode *raiz_ast)
     return ambito_actual;
 }
 
-void inicializarTablaSimbolos()
+void inicializarTablaSimbolos(void)
 {
     EntradaSimbolo *entrada;
 

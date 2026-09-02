@@ -21,7 +21,6 @@ int next_label_number = 0;
 static TablaSimbolos *global_symbol_table_ref;
 static TablaSimbolos *ambito_actual = NULL;
 static ASTNode *program_root = NULL;
-static ASTNode *current_function = NULL;
 static char *current_return_value = NULL;
 static enum TipoDato current_return_type = TIPO_ERROR;
 
@@ -82,8 +81,6 @@ static void generate_code_for_declaration(ASTNode *decl_node);
 static void generate_code_for_if_statement(ASTNode *if_node);
 static void generate_code_for_while_statement(ASTNode *while_node);
 static void generate_code_for_for_statement(ASTNode *for_node);
-static int es_entero(const char *s);
-static int es_flotante(const char *s);
 static char *new_float_temp(void);
 static int es_operando_flotante(const char *s);
 static void cargar_float_en_xmm(FILE *f, const char *operando, const char *registro);
@@ -925,34 +922,6 @@ void imprimir_codigo_intermedio(void)
         printf("%s)\n", q.result ? q.result : "NULL");
     }
     printf("---------------------------------------\n");
-}
-
-static int es_entero(const char *s)
-{
-    if (!s)
-        return 0;
-    for (int i = 0; s[i]; i++)
-    {
-        if (!isdigit(s[i]) && !(i == 0 && s[i] == '-'))
-            return 0;
-    }
-    return 1;
-}
-
-static int es_flotante(const char *s)
-{
-    if (!s)
-        return 0;
-    int punto = 0;
-    for (int i = 0; s[i]; i++)
-    {
-        if (s[i] == '.')
-            punto++;
-        else if (!isdigit(s[i]) && !(i == 0 && s[i] == '-'))
-            return 0;
-    }
-
-    return punto == 1;
 }
 
 static int es_operando_flotante(const char *s)

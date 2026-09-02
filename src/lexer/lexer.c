@@ -17,7 +17,7 @@ const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Ro
 void EsID(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
     char lexema[100];
-    int i = 0;
+    size_t i = 0;
     lexema[i++] = car_inicial;
 
     int car_siguiente;
