@@ -1353,6 +1353,8 @@ void generate_asm(FILE *f)
     const char *scanf_sym = "scanf";
     const char *main_sym = "main";
 
+    fprintf(f, "BITS 64\n");
+
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
@@ -1551,6 +1553,9 @@ void generate_asm(FILE *f)
     fprintf(f, "%s:\n", main_sym);
     fprintf(f, "    push rbp\n");
     fprintf(f, "    mov rbp, rsp\n");
+#if defined(_WIN32)
+    fprintf(f, "    sub rsp, 32\n");
+#endif
 
     for (int i = 0; i < ir_current_size; i++)
     {
@@ -1804,6 +1809,7 @@ void generate_asm(FILE *f)
             {
                 cargar_float_en_xmm(f, q->arg1, "xmm0");
                 fprintf(f,
+                    "    movq rdx, xmm0\n"
                     "    lea rcx, [rel fmt_float]\n"
                     "    mov eax, 1\n"
                     "    call %s\n", printf_sym);
@@ -1824,6 +1830,7 @@ void generate_asm(FILE *f)
                     fprintf(f,
                         "    lea rcx, [rel fmt_float]\n"
                         "    movsd xmm0, qword [rel %s]\n"
+                        "    movq rdx, xmm0\n"
                         "    xor eax, eax\n"
                         "    call %s\n",
                         q->arg1, printf_sym);
@@ -1935,7 +1942,11 @@ void generate_asm(FILE *f)
                             strcmp(q->arg1, "Contiene") == 0;
             if (strcmp(q->arg1, "Http") == 0) {
                 char *http_args[] = {first, second, third, fourth};
+#if defined(_WIN32)
+                const char *registers[] = {"rcx", "rdx", "r8", "r9"};
+#else
                 const char *registers[] = {"rdi", "rsi", "rdx", "rcx"};
+#endif
                 for (int n = 0; n < 4; n++) {
                     if (!http_args[n])
                         fprintf(f, "    xor %s, %s\n", registers[n], registers[n]);
@@ -2121,17 +2132,16 @@ void generate_asm(FILE *f)
         }
     }
 
-    fprintf(f, "    pop rbp\n");
-
 #if defined(_WIN32)
     fprintf(f, "    extern ExitProcess\n");
     fprintf(f, "    mov ecx, 0\n");
     fprintf(f, "    call ExitProcess\n");
 #else
+    fprintf(f, "    pop rbp\n");
     fprintf(f, "    ret\n");
 #endif
 
-#if !defined(__APPLE__)
+#if defined(__linux__)
     fprintf(f, "section .note.GNU-stack noalloc noexec nowrite progbits\n");
 #endif
 }

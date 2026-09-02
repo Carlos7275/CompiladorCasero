@@ -4,6 +4,9 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 #include "file.h"
 #include "types.h"
 #include "parser.h"
@@ -11,6 +14,10 @@
 #include "symbols.h"
 #include "codegen.h"
 #include "errors.h"
+
+#ifndef PATH_MAX
+#define PATH_MAX 32768
+#endif
 
 extern struct nodo *raiz;
 extern struct nodo *actual;
@@ -245,7 +252,13 @@ static void cargar_dotenv(const char *source_path)
             value++;
         }
         if (*key != '\0' && getenv(key) == NULL)
+        {
+    #ifdef _WIN32
+            _putenv_s(key, value);
+    #else
             setenv(key, value, 0);
+    #endif
+        }
     }
     fclose(env);
 }
@@ -262,7 +275,11 @@ static ASTNode *expand_imports(ASTNode *program, const char *source_path,
         return NULL;
     }
     char canonical[PATH_MAX];
+#ifdef _WIN32
+    if (_fullpath(canonical, source_path, sizeof(canonical)) == NULL)
+#else
     if (realpath(source_path, canonical) == NULL)
+#endif
         snprintf(canonical, sizeof(canonical), "%s", source_path);
     if (path_in_stack(canonical, stack, depth))
     {
@@ -270,7 +287,11 @@ static ASTNode *expand_imports(ASTNode *program, const char *source_path,
         import_failed = 1;
         return NULL;
     }
+#ifdef _WIN32
+    stack[depth] = _strdup(canonical);
+#else
     stack[depth] = strdup(canonical);
+#endif
 
     ASTNode *head = NULL, *tail = NULL;
     ASTNode *node = program->hijo_izq;
@@ -282,8 +303,19 @@ static ASTNode *expand_imports(ASTNode *program, const char *source_path,
         {
             char imported[PATH_MAX];
             const char *slash = strrchr(source_path, '/');
+#ifdef _WIN32
+            const char *backslash = strrchr(source_path, '\\');
+            if (backslash != NULL && (slash == NULL || backslash > slash))
+                slash = backslash;
+#endif
             size_t dir_len = slash ? (size_t)(slash - source_path + 1) : 0;
-            if (node->valor.valor_cadena[0] == '/')
+            int absolute_path = node->valor.valor_cadena[0] == '/';
+#ifdef _WIN32
+            absolute_path = absolute_path || node->valor.valor_cadena[0] == '\\' ||
+                            (isalpha((unsigned char)node->valor.valor_cadena[0]) &&
+                             node->valor.valor_cadena[1] == ':');
+#endif
+            if (absolute_path)
                 snprintf(imported, sizeof(imported), "%s", node->valor.valor_cadena);
             else
                 snprintf(imported, sizeof(imported), "%.*s%s", (int)dir_len,
@@ -625,7 +657,11 @@ int main(int argc, const char *argv[])
         int run_status = run_executable(opts.output_name);
         if (run_status != 0)
         {
+#ifdef _WIN32
+            log_error("runtime", "El programa retorno con codigo: %d", run_status);
+#else
             log_error("runtime", "El programa retorno con codigo: %d", WEXITSTATUS(run_status));
+#endif
             cleanup_intermediates(ctx.asm_file, ctx.obj_file, opts.preserve_asm);
             free_compilation_context(&ctx);
             return EXIT_FAILURE;
