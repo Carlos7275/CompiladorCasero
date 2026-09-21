@@ -195,155 +195,164 @@ enum TipoDato EsPalabraReservadaConTipo(const char *lexema, enum TipoToken *out_
  */
 void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
-    char lexema[100];
-    int i = 0;
-    lexema[i++] = car_inicial;
-
+    char lexema[3] = {0};
     int next_char_val;
+
+    lexema[0] = car_inicial;
 
     switch (car_inicial)
     {
     case '+':
-        next_char_val = fgetc(archivo); // Mira el siguiente carácter
+        next_char_val = fgetc(archivo);
+
         if (next_char_val == '+')
         {
-            lexema[i++] = '+'; // Si es otro '+', lo añade al lexema
-            lexema[i] = '\0';
-            generarToken(UNARIO, lexema, OTRO, Col, Renglon); // Es '++'
-            Col++;                                            // Consumimos un carácter adicional, avanzamos la columna global
+            lexema[1] = '+';
+            generarToken(UNARIO, lexema, OTRO, Col, Renglon);
+        }
+        else if (next_char_val == '=')
+        {
+            lexema[1] = '=';
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);                 // Si no es '+', lo devuelve al stream
-            lexema[i] = '\0';                               // Es solo '+'
-            generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operador Aritmético simple
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            generarToken(OPAR, lexema, OTRO, Col, Renglon);
         }
         break;
 
     case '-':
-        next_char_val = fgetc(archivo); // Mira el siguiente carácter
+        next_char_val = fgetc(archivo);
+
         if (next_char_val == '-')
         {
-            lexema[i++] = '-'; // Si es otro '-', lo añade al lexema
-            lexema[i] = '\0';
-            generarToken(OPAR, lexema, OTRO, Col, Renglon); // Es '--'
-            Col++;                                          // Consumimos un carácter adicional, avanzamos la columna global
+            lexema[1] = '-';
+            generarToken(UNARIO, lexema, OTRO, Col, Renglon);
+        }
+        else if (next_char_val == '=')
+        {
+            lexema[1] = '=';
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);                 // Si no es '-', lo devuelve al stream
-            lexema[i] = '\0';                               // Es solo '-'
-            generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operador Aritmético simple
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            generarToken(OPAR, lexema, OTRO, Col, Renglon);
         }
         break;
 
     case '*':
     case '/':
-        lexema[i] = '\0';                               // Aseguramos que sea nulo-terminado después del único carácter
-        generarToken(OPAR, lexema, OTRO, Col, Renglon); // Operadores Aritméticos simples
-        break;
     case '%':
-        lexema[i] = '\0';
-        generarToken(OPAR, lexema, OTRO, Col, Renglon);
-        break;
-    case '=':
-        next_char_val = fgetc(archivo); // Miramos el siguiente carácter
+        next_char_val = fgetc(archivo);
+
         if (next_char_val == '=')
         {
-            lexema[i++] = '='; // Si es otro '=', lo añadimos
-            lexema[i] = '\0';
-            generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '=='
-            Col++;                                            // Consumimos un carácter adicional
+            lexema[1] = '=';
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);                    // Si no es '=', lo devolvemos
-            lexema[i] = '\0';                                  // Es solo '='
-            generarToken(OPASIGN, lexema, OTRO, Col, Renglon); // Operador de Asignación
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            generarToken(OPAR, lexema, OTRO, Col, Renglon);
+        }
+        break;
+
+    case '=':
+        next_char_val = fgetc(archivo);
+
+        if (next_char_val == '=')
+        {
+            lexema[1] = '=';
+            generarToken(OPCOMP, lexema, OTRO, Col, Renglon);
+        }
+        else
+        {
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
         }
         break;
 
     case '!':
         next_char_val = fgetc(archivo);
+
         if (next_char_val == '=')
         {
-            lexema[i++] = '=';
-            lexema[i] = '\0';
-            generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '!='
-            Col++;                                            // Consumimos un carácter adicional
+            lexema[1] = '=';
+            generarToken(OPCOMP, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);
-            lexema[i] = '\0';
-            generarToken(OPLOG, lexema, OTRO, Col, Renglon); // Es '!' (NOT lógico)
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            generarToken(OPLOG, lexema, OTRO, Col, Renglon);
         }
         break;
 
     case '<':
-        next_char_val = fgetc(archivo);
-        if (next_char_val == '=')
-        {
-            lexema[i++] = '=';
-            lexema[i] = '\0';
-            generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '<='
-            Col++;                                            // Consumimos un carácter adicional
-        }
-        else
-        {
-            ungetc(next_char_val, archivo);
-            lexema[i] = '\0';
-            generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '<'
-        }
-        break;
-
     case '>':
         next_char_val = fgetc(archivo);
+
         if (next_char_val == '=')
         {
-            lexema[i++] = '=';
-            lexema[i] = '\0';
-            generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '>='
-            Col++;                                            // Consumimos un carácter adicional
+            lexema[1] = '=';
+            generarToken(OPCOMP, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);
-            lexema[i] = '\0';
-            generarToken(OPCOMP, lexema, OTRO, Col, Renglon); // Es '>'
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            generarToken(OPCOMP, lexema, OTRO, Col, Renglon);
         }
         break;
 
     case '&':
         next_char_val = fgetc(archivo);
+
         if (next_char_val == '&')
         {
-            lexema[i++] = '&';
-            lexema[i] = '\0';
-            generarToken(OPLOG, lexema, OTRO, Col, Renglon); // Es '&&'
-            Col++;                                           // Consumimos un carácter adicional
+            lexema[1] = '&';
+            generarToken(OPLOG, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);
-            fprintf(stderr, "Error (R%d, C%d): Símbolo inesperado '%c'. Se esperaba '&&'.\n", Renglon, Col, car_inicial);
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            fprintf(stderr,
+                    "Error (R%d, C%d): Símbolo inesperado '&'. Se esperaba '&&'.\n",
+                    Renglon, Col);
             exit(EXIT_FAILURE);
         }
         break;
 
     case '|':
         next_char_val = fgetc(archivo);
+
         if (next_char_val == '|')
         {
-            lexema[i++] = '|';
-            lexema[i] = '\0';
-            generarToken(OPLOG, lexema, OTRO, Col, Renglon); // Es '||'
-            Col++;                                           // Consumimos un carácter adicional
+            lexema[1] = '|';
+            generarToken(OPLOG, lexema, OTRO, Col, Renglon);
         }
         else
         {
-            ungetc(next_char_val, archivo);
-            fprintf(stderr, "Error (R%d, C%d): Símbolo inesperado '%c'. Se esperaba '||'.\n", Renglon, Col, car_inicial);
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+
+            fprintf(stderr,
+                    "Error (R%d, C%d): Símbolo inesperado '|'. Se esperaba '||'.\n",
+                    Renglon, Col);
             exit(EXIT_FAILURE);
         }
         break;
@@ -355,21 +364,22 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
     case '(':
     case ')':
     case ';':
-    case ':':                                               // El caracter ':' se maneja aquí como símbolo especial
-    case ',':                                               // La coma también es un símbolo especial
+    case ':':
+    case ',':
     case '.':
-        lexema[i] = '\0';                                   // Aseguramos nulo-terminación
-        generarToken(ESPECIAL, lexema, OTRO, Col, Renglon); // Símbolos Especiales
+    case '?':
+        generarToken(ESPECIAL, lexema, OTRO, Col, Renglon);
         break;
 
-    case '"': // Las comillas deben ser manejadas por EsCadena, EsSimbolo no debería llegar aquí
-        fprintf(stderr, "Error (R%d, C%d): Comilla doble inesperada aquí. Posible error en flujo de lexer.\n", Renglon, Col);
+    case '"':
+        fprintf(stderr,
+                "Error (R%d, C%d): Comilla doble inesperada aquí.\n",
+                Renglon, Col);
         exit(EXIT_FAILURE);
         break;
 
     default:
-        lexema[i] = '\0';                                      // Aseguramos nulo-terminación
-        generarToken(DESCONOCIDO, lexema, OTRO, Col, Renglon); // Carácter desconocido
+        generarToken(DESCONOCIDO, lexema, OTRO, Col, Renglon);
         break;
     }
 }

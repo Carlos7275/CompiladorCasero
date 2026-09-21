@@ -1,8 +1,10 @@
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
+#include <stdio.h>
 #include "parser.h"
 #include "symbols.h"
+
 #define INITIAL_IR_CAPACITY 128
 
 typedef enum
@@ -27,9 +29,17 @@ typedef enum
     IR_GOTO,
     IR_IF_FALSE_GOTO,
 
+    IR_LOAD_ARRAY,
+    IR_STORE_ARRAY,
+
     IR_PRINT,
     IR_READ,
     IR_NATIVE_CALL,
+
+    /* Llamadas y funciones reales del backend. */
+    IR_CALL,
+    IR_FUNCTION_BEGIN,
+    IR_FUNCTION_END,
     IR_HALT
 } IROperation;
 
@@ -102,10 +112,27 @@ int get_ir_code_size(void);
  * @brief Imprime el código intermedio generado a la salida estándar.
  */
 void imprimir_codigo_intermedio(void);
+
 /**
  * @brief Optimiza el CodigoIntermedio de todas sus operaciones.
  */
 void optimize_ir_code(void);
 
+/**
+ * @brief Genera el código ensamblador x86-64 a partir del código intermedio.
+ *
+ * El backend soporta llamadas reales a funciones mediante IR_CALL y permite
+ * mantener un stack frame independiente por invocación, incluyendo recursión.
+ *
+ * @param f Archivo de salida donde se escribirá el ensamblador generado.
+ */
 void generate_asm(FILE *f);
+
+/**
+ * @brief Convierte un nombre a una representación segura para usarlo como símbolo ASM.
+ * @param nombre Nombre original del símbolo.
+ * @return Nombre seguro para el ensamblador.
+ */
+const char *nombre_asm_seguro(const char *nombre);
+
 #endif

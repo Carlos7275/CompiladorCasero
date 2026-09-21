@@ -53,7 +53,8 @@ static const FuncionNativa funciones_nativas[] = {
     {"Entorno", STRING, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
     {"ExisteEntorno", BOOL, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
     {"HttpCuerpo", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
-    {"HttpCabeceras", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR}
+    {"HttpCabeceras", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
+     {"Decimales", FLOAT, FLOAT, INT, 2, TIPO_ERROR, TIPO_ERROR}
 };
 
 static const FuncionNativa *buscar_funcion_nativa(const char *nombre, int argumentos)
@@ -250,9 +251,63 @@ void verificar_asignacion(int renglon, int columna, enum TipoDato tipo_destino, 
         return;
     }
 
+    /*
+     * Booleano e Entero comparten representación lógica:
+     * Booleano -> Entero: Verdadero/Falso se representan como 1/0.
+     * Entero 0/1 -> Booleano: conversión segura.
+     *
+     * La conversión general Entero -> Booleano se valida con la expresión
+     * para poder rechazar literales distintos de 0 y 1.
+     */
+    if (tipo_destino == INT && tipo_origen == BOOL)
+    {
+        return;
+    }
+
+    if (tipo_destino == BOOL && tipo_origen == INT)
+    {
+        return;
+    }
+
     reportar_error_semantico(renglon, columna,
                              "Tipos incompatibles en asignacion: no se puede asignar %s a %s.",
                              tipoDatoToString(tipo_origen), tipoDatoToString(tipo_destino));
+}
+
+/**
+ * Valida una asignación considerando la expresión origen para aplicar
+ * las reglas especiales de compatibilidad entre Entero y Booleano.
+ *
+ * @param renglon Línea de la asignación.
+ * @param columna Columna de la asignación.
+ * @param tipo_destino Tipo del destino.
+ * @param expresion Origen completo de la asignación.
+ */
+static void verificar_asignacion_expresion(int renglon, int columna,
+                                           enum TipoDato tipo_destino, ASTNode *expresion)
+{
+    if (expresion == NULL)
+    {
+        return;
+    }
+
+    enum TipoDato tipo_origen = expresion->resolved_type;
+
+    if (tipo_destino == BOOL && tipo_origen == INT)
+    {
+        if (expresion->type == AST_LITERAL_ENTERO &&
+            (expresion->valor.valor_entero == 0 || expresion->valor.valor_entero == 1))
+        {
+            return;
+        }
+
+        reportar_error_semantico(renglon, columna,
+                                 "No se puede asignar Entero a Booleano: solo los valores 0 y 1 "
+                                 "son compatibles en una asignacion directa.");
+        return;
+    }
+
+    verificar_asignacion(renglon, columna, tipo_destino, tipo_origen);
 }
 
 /**
@@ -317,7 +372,13 @@ enum TipoDato verificar_expresion_comparacion(int renglon, int columna, enum Tip
         return BOOL;
     }
 
-    if ((tipo1 == STRING && tipo1 == STRING) ||
+    if ((tipo1 == BOOL || tipo1 == INT) &&
+        (tipo2 == BOOL || tipo2 == INT))
+    {
+        return BOOL;
+    }
+
+    if ((tipo1 == STRING && tipo2 == STRING) ||
         (tipo1 == CHAR && tipo2 == CHAR))
     {
         return BOOL;
@@ -329,6 +390,17 @@ enum TipoDato verificar_expresion_comparacion(int renglon, int columna, enum Tip
     return TIPO_ERROR;
 }
 
+/**
+ * Valida una operación lógica binaria usando Booleano o Entero como
+ * operandos booleanos. En Entero, 0 representa falso y cualquier valor
+ * distinto de 0 representa verdadero.
+ *
+ * @param renglon Línea del operador.
+ * @param columna Columna del operador.
+ * @param tipo1 Tipo del primer operando.
+ * @param tipo2 Tipo del segundo operando.
+ * @return BOOL si la operación es válida, o TIPO_ERROR en caso contrario.
+ */
 enum TipoDato verificar_expresion_logica(int renglon, int columna, enum TipoDato tipo1, enum TipoDato tipo2)
 {
     if (tipo1 == TIPO_ERROR || tipo2 == TIPO_ERROR)
@@ -336,13 +408,15 @@ enum TipoDato verificar_expresion_logica(int renglon, int columna, enum TipoDato
         return TIPO_ERROR;
     }
 
-    if (tipo1 == BOOL && tipo2 == BOOL)
+    if ((tipo1 == BOOL || tipo1 == INT) &&
+        (tipo2 == BOOL || tipo2 == INT))
     {
         return BOOL;
     }
 
     reportar_error_semantico(renglon, columna,
-                             "Operacion logica con tipos incompatibles: %s y %s. Se esperaban Booleanos.",
+                             "Operacion logica con tipos incompatibles: %s y %s. "
+                             "Se esperaban Booleanos o Enteros.",
                              tipoDatoToString(tipo1), tipoDatoToString(tipo2));
     return TIPO_ERROR;
 }
@@ -365,6 +439,16 @@ enum TipoDato verificar_negacion_unaria(int renglon, int columna, enum TipoDato 
     return TIPO_ERROR;
 }
 
+/**
+ * Valida una negación lógica usando Booleano o Entero como operando.
+ * Para Entero, 0 representa falso y cualquier valor distinto de 0
+ * representa verdadero.
+ *
+ * @param renglon Línea del operador.
+ * @param columna Columna del operador.
+ * @param tipo Tipo del operando.
+ * @return BOOL si el operador es válido, o TIPO_ERROR en caso contrario.
+ */
 enum TipoDato verificar_negacion_logica(int renglon, int columna, enum TipoDato tipo)
 {
     if (tipo == TIPO_ERROR)
@@ -372,13 +456,13 @@ enum TipoDato verificar_negacion_logica(int renglon, int columna, enum TipoDato 
         return TIPO_ERROR;
     }
 
-    if (tipo == BOOL)
+    if (tipo == BOOL || tipo == INT)
     {
         return BOOL;
     }
 
     reportar_error_semantico(renglon, columna,
-                             "Operador de negacion logica (NOT) aplicado a tipo no booleano: %s.",
+                             "Operador de negacion logica (NOT) aplicado a tipo no booleano ni entero: %s.",
                              tipoDatoToString(tipo));
     return TIPO_ERROR;
 }
@@ -563,8 +647,7 @@ void visit_ast_semantic(ASTNode *node)
         if (node->hijo_der != NULL)
         {
             visit_ast_semantic(node->hijo_der);
-            enum TipoDato tipo_expr = node->hijo_der->resolved_type;
-            verificar_asignacion(node->renglon, node->columna, tipo_declarado, tipo_expr);
+            verificar_asignacion_expresion(node->renglon, node->columna, tipo_declarado, node->hijo_der);
         }
         break;
     }
@@ -638,54 +721,44 @@ void visit_ast_semantic(ASTNode *node)
     {
         visit_ast_semantic(node->hijo_izq);
 
-        if (node->hijo_izq->type != AST_IDENTIFICADOR)
+        if (node->hijo_izq == NULL)
         {
-            reportar_error_semantico(node->renglon, node->columna,
-                                     "El lado izquierdo de la asignacion debe ser un identificador.");
             node->resolved_type = TIPO_ERROR;
+            break;
         }
-        else
+
+        if (node->hijo_izq->type != AST_IDENTIFICADOR &&
+            node->hijo_izq->type != AST_ACCESO_ARRAY)
         {
-            const char *nombre_var = node->hijo_izq->valor.nombre_id;
-            EntradaSimbolo *entrada = buscar_simbolo(ambito_actual, nombre_var);
-
-            if (entrada == NULL)
-            {
-                reportar_error_semantico(node->renglon, node->columna,
-                                         "Uso de variable/constante no declarada: '%s'", nombre_var);
-                node->resolved_type = TIPO_ERROR;
-            }
-            else
-            {
-                if (entrada->es_constante)
-                {
-                    reportar_error_semantico(node->renglon, node->columna,
-                                             "No se puede asignar a la constante '%s'.", nombre_var);
-                    node->resolved_type = TIPO_ERROR;
-                }
-
-                node->hijo_izq->resolved_type = entrada->tipo;
-            }
+            reportar_error_semantico(
+                node->renglon,
+                node->columna,
+                "El lado izquierdo de la asignacion debe ser un identificador o un acceso a array."
+            );
+            node->resolved_type = TIPO_ERROR;
         }
 
         visit_ast_semantic(node->hijo_der);
 
         enum TipoDato tipo_destino = node->hijo_izq->resolved_type;
-        enum TipoDato tipo_origen = node->hijo_der->resolved_type;
+        enum TipoDato tipo_origen = node->hijo_der
+                                      ? node->hijo_der->resolved_type
+                                      : TIPO_ERROR;
 
         if (tipo_destino != TIPO_ERROR && tipo_origen != TIPO_ERROR)
         {
-            verificar_asignacion(node->renglon, node->columna, tipo_destino, tipo_origen);
+            verificar_asignacion_expresion(
+                node->renglon,
+                node->columna,
+                tipo_destino,
+                node->hijo_der
+            );
         }
 
-        if (node->resolved_type != TIPO_ERROR && tipo_destino != TIPO_ERROR && tipo_origen != TIPO_ERROR)
-        {
-            node->resolved_type = tipo_destino;
-        }
-        else
-        {
-            node->resolved_type = TIPO_ERROR;
-        }
+        node->resolved_type =
+            (tipo_destino != TIPO_ERROR && tipo_origen != TIPO_ERROR)
+                ? tipo_destino
+                : TIPO_ERROR;
 
         break;
     }
@@ -705,10 +778,12 @@ void visit_ast_semantic(ASTNode *node)
     case AST_SI_STMT:
     {
         visit_ast_semantic(node->hijo_izq);
-        if (node->hijo_izq->resolved_type != BOOL && node->hijo_izq->resolved_type != TIPO_ERROR)
+        if (node->hijo_izq->resolved_type != BOOL &&
+            node->hijo_izq->resolved_type != INT &&
+            node->hijo_izq->resolved_type != TIPO_ERROR)
         {
             reportar_error_semantico(node->hijo_izq->renglon, node->hijo_izq->columna,
-                                     "La condicion de la sentencia 'Si' debe ser booleana, se encontro %s.",
+                                     "La condicion de la sentencia 'Si' debe ser Booleano o Entero, se encontro %s.",
                                      tipoDatoToString(node->hijo_izq->resolved_type));
         }
         visit_ast_semantic(node->hijo_der);
@@ -727,10 +802,12 @@ void visit_ast_semantic(ASTNode *node)
     {
 
         visit_ast_semantic(node->hijo_izq);
-        if (node->hijo_izq->resolved_type != BOOL && node->hijo_izq->resolved_type != TIPO_ERROR)
+        if (node->hijo_izq->resolved_type != BOOL &&
+            node->hijo_izq->resolved_type != INT &&
+            node->hijo_izq->resolved_type != TIPO_ERROR)
         {
             reportar_error_semantico(node->hijo_izq->renglon, node->hijo_izq->columna,
-                                     "La condicion del bucle 'Mientras' debe ser booleana, se encontro %s.",
+                                     "La condicion del bucle 'Mientras' debe ser Booleano o Entero, se encontro %s.",
                                      tipoDatoToString(node->hijo_izq->resolved_type));
         }
         profundidad_loop++;
@@ -762,10 +839,12 @@ void visit_ast_semantic(ASTNode *node)
                 {
                     visit_ast_semantic(condicion_node);
 
-                    if (condicion_node->resolved_type != BOOL && condicion_node->resolved_type != TIPO_ERROR)
+                    if (condicion_node->resolved_type != BOOL &&
+                        condicion_node->resolved_type != INT &&
+                        condicion_node->resolved_type != TIPO_ERROR)
                     {
                         reportar_error_semantico(condicion_node->renglon, condicion_node->columna,
-                                                 "La condicion del bucle 'Para' debe ser booleana, se encontro %s.",
+                                                 "La condicion del bucle 'Para' debe ser Booleano o Entero, se encontro %s.",
                                                  DataTypeNames[condicion_node->resolved_type]);
                     }
 
@@ -866,6 +945,116 @@ void visit_ast_semantic(ASTNode *node)
         node->resolved_type = verificar_negacion_unaria(
             node->renglon, node->columna,
             node->hijo_izq->resolved_type);
+        break;
+    }
+
+    case AST_ACCESO_ARRAY:
+    {
+        if (node->hijo_izq == NULL ||
+            node->hijo_izq->type != AST_IDENTIFICADOR)
+        {
+            node->resolved_type = TIPO_ERROR;
+            break;
+        }
+
+        const char *nombre_array = node->hijo_izq->valor.nombre_id;
+        EntradaSimbolo *entrada =
+            buscar_simbolo(ambito_actual, nombre_array);
+
+        if (entrada == NULL)
+        {
+            reportar_error_semantico(
+                node->renglon,
+                node->columna,
+                "Uso de variable/constante no declarada: '%s'",
+                nombre_array
+            );
+            node->resolved_type = TIPO_ERROR;
+            break;
+        }
+
+        if (node->hijo_der == NULL)
+        {
+            node->resolved_type = TIPO_ERROR;
+            break;
+        }
+
+        visit_ast_semantic(node->hijo_der);
+
+        if (node->hijo_der->resolved_type != INT &&
+            node->hijo_der->resolved_type != TIPO_ERROR)
+        {
+            reportar_error_semantico(
+                node->hijo_der->renglon,
+                node->hijo_der->columna,
+                "El indice de un array debe ser de tipo Entero."
+            );
+            node->resolved_type = TIPO_ERROR;
+            break;
+        }
+
+        node->hijo_izq->resolved_type = entrada->tipo;
+        node->resolved_type = entrada->tipo;
+        break;
+    }
+
+    case AST_TERNARIO_EXPR:
+    {
+        if (node->hijo_izq == NULL ||
+            node->hijo_der == NULL ||
+            node->siguiente_hermano == NULL)
+        {
+            node->resolved_type = TIPO_ERROR;
+            break;
+        }
+
+        visit_ast_semantic(node->hijo_izq);
+        visit_ast_semantic(node->hijo_der);
+        visit_ast_semantic(node->siguiente_hermano);
+
+        enum TipoDato tipo_condicion = node->hijo_izq->resolved_type;
+        enum TipoDato tipo_verdadero = node->hijo_der->resolved_type;
+        enum TipoDato tipo_falso = node->siguiente_hermano->resolved_type;
+
+        if (tipo_condicion != BOOL &&
+            tipo_condicion != INT &&
+            tipo_condicion != TIPO_ERROR)
+        {
+            reportar_error_semantico(
+                node->hijo_izq->renglon,
+                node->hijo_izq->columna,
+                "La condicion del operador ternario debe ser Booleano o Entero."
+            );
+        }
+
+        if (tipo_condicion == TIPO_ERROR ||
+            tipo_verdadero == TIPO_ERROR ||
+            tipo_falso == TIPO_ERROR)
+        {
+            node->resolved_type = TIPO_ERROR;
+            break;
+        }
+
+        if (tipo_verdadero == tipo_falso)
+            node->resolved_type = tipo_verdadero;
+        else if ((tipo_verdadero == INT && tipo_falso == FLOAT) ||
+                 (tipo_verdadero == FLOAT && tipo_falso == INT))
+            node->resolved_type = FLOAT;
+        else if ((tipo_verdadero == BOOL && tipo_falso == INT) ||
+                 (tipo_verdadero == INT && tipo_falso == BOOL))
+            node->resolved_type = INT;
+        else
+        {
+            reportar_error_semantico(
+                node->renglon,
+                node->columna,
+                "Las expresiones del operador ternario deben tener tipos compatibles: %s y %s.",
+                tipoDatoToString(tipo_verdadero),
+                tipoDatoToString(tipo_falso)
+            );
+            node->resolved_type = TIPO_ERROR;
+        }
+
         break;
     }
 

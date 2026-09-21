@@ -1,0 +1,181 @@
+// ==========================================
+// PRUEBA DE NUEVAS CARACTERISTICAS DE Mx
+// ==========================================
+
+
+    // ------------------------------------------
+    // Variables
+    // ------------------------------------------
+
+    Entero x = 10;
+    Entero y = 5;
+    Entero i = 0;
+
+    Mostrar("=== ASIGNACIONES COMPUESTAS ===");
+
+    x += 5;
+    Mostrar(x);       // 15
+
+    x -= 3;
+    Mostrar(x);       // 12
+
+    x *= 2;
+    Mostrar(x);       // 24
+
+    x /= 4;
+    Mostrar(x);       // 6
+
+    x %= 4;
+    Mostrar(x);       // 2
+
+
+    // ------------------------------------------
+    // ++ y --
+    // ------------------------------------------
+
+    Mostrar("=== INCREMENTO / DECREMENTO ===");
+
+    x++;
+    Mostrar(x);       // 3
+
+    x--;
+    Mostrar(x);       // 2
+
+
+    // ------------------------------------------
+    // Array
+    // ------------------------------------------
+
+    Mostrar("=== ARRAYS ===");
+
+    Entero numeros[5] = {10, 20, 30, 40, 50};
+
+    Mostrar(numeros[0]);
+    Mostrar(numeros[1]);
+    Mostrar(numeros[2]);
+
+    // Acceso dinamico
+    i = 2;
+
+    Mostrar(numeros[i]);
+
+    // Escritura dinamica
+    numeros[i] = 100;
+
+    Mostrar(numeros[i]);
+
+
+    // ------------------------------------------
+    // Operaciones sobre array
+    // ------------------------------------------
+
+    Mostrar("=== ARRAY + OPERADORES COMPUESTOS ===");
+
+    numeros[i] += 10;
+    Mostrar(numeros[i]);
+
+    numeros[i] -= 5;
+    Mostrar(numeros[i]);
+
+    numeros[i] *= 2;
+    Mostrar(numeros[i]);
+
+    numeros[i] /= 5;
+    Mostrar(numeros[i]);
+
+    numeros[i] %= 10;
+    Mostrar(numeros[i]);
+
+
+    // ------------------------------------------
+    // Ternario
+    // ------------------------------------------
+
+    Mostrar("=== TERNARIO ===");
+
+    Entero mayor;
+
+    mayor = x > y ? x : y;
+
+    Mostrar(mayor);
+
+
+    // ------------------------------------------
+    // Ternarios con expresiones
+    // ------------------------------------------
+
+    Entero a = 20;
+    Entero b = 10;
+
+    Entero resultado;
+
+    resultado = a > b ? a + 5 : b + 5;
+
+    Mostrar(resultado);
+
+
+    // ------------------------------------------
+    // Ternario booleano
+    // ------------------------------------------
+
+    Booleano activo = Verdadero;
+
+    Entero estado;
+
+    estado = activo ? 1 : 0;
+
+    Mostrar(estado);
+
+
+    // ------------------------------------------
+    // Array dentro de ternario
+    // ------------------------------------------
+
+    i = 3;
+
+    Entero valorArray;
+
+    valorArray = numeros[i] > 50 ? numeros[i] : 0;
+
+    Mostrar(valorArray);
+
+
+    // ------------------------------------------
+    // FOR
+    // ------------------------------------------
+
+    Mostrar("=== FOR ===");
+
+    Entero suma = 0;
+
+    Para(Entero j = 0; j < 5; j++) {
+
+        suma += 10;
+    }
+
+    Mostrar(suma);
+
+
+    // ------------------------------------------
+    // ARRAY + FOR
+    // ------------------------------------------
+
+    Mostrar("=== ARRAY + FOR ===");
+
+    Para(Entero k = 0; k < 5; k++) {
+
+        numeros[k] += 1;
+    }
+
+    Mostrar(numeros[0]);
+    Mostrar(numeros[1]);
+    Mostrar(numeros[2]);
+    Mostrar(numeros[3]);
+    Mostrar(numeros[4]);
+
+
+    // ------------------------------------------
+    // FINAL
+    // ------------------------------------------
+
+    Mostrar("=== FIN DE PRUEBA ===");

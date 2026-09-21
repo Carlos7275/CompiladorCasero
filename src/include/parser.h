@@ -9,7 +9,6 @@
 
 enum ASTNodeType
 {
-
     AST_PROGRAMA,
     AST_LISTA_SENTENCIAS,
 
@@ -51,12 +50,16 @@ enum ASTNodeType
     AST_LITERAL_ENTERO,
     AST_LITERAL_FLOTANTE,
     AST_LITERAL_CADENA,
-    AST_LITERAL_BOOLEANO
-    ,AST_DECLARACION_TIPO
-    ,AST_FUNCION
-    ,AST_LLAMADA
-    ,AST_RETORNAR_STMT
-    ,AST_IMPORT
+    AST_LITERAL_BOOLEANO,
+
+    AST_DECLARACION_TIPO,
+    AST_FUNCION,
+    AST_LLAMADA,
+    AST_RETORNAR_STMT,
+    AST_IMPORT,
+
+    AST_ACCESO_ARRAY,
+    AST_TERNARIO_EXPR
 };
 
 enum ASTConstant
@@ -73,6 +76,7 @@ typedef struct ASTNode
     struct ASTNode *hijo_izq;
     struct ASTNode *hijo_der;
     struct ASTNode *siguiente_hermano;
+
     union
     {
         char *nombre_id;
@@ -86,11 +90,16 @@ typedef struct ASTNode
     enum TipoDato resolved_type;
 
     enum ASTConstant tipoconstante;
+
     int renglon;
     int columna;
+
     char *ir_result_name;
+
     struct ASTNode *parametros;
+
     enum TipoDato return_type;
+
     char *tipo_nombre;
 
 } ASTNode;
@@ -106,16 +115,21 @@ void match(enum TipoToken tipo_esperado, const char *lexema_esperado);
 ASTNode *parsePrograma(void);
 ASTNode *parseListaSentencias(void);
 ASTNode *parseSentenciaODeclaracion(void);
+
 ASTNode *parseDeclaracion(void);
 ASTNode *parseDeclaracionConstante(void);
 ASTNode *parseAsignacion(void);
+
 ASTNode *parseMostrarStmt(void);
 ASTNode *parseLeerStmt(void);
+
 ASTNode *parseSentenciaCondicional(void);
 ASTNode *parseSentenciaBucleMientras(void);
 ASTNode *parseSentenciaBuclePara(void);
+
 ASTNode *parseBloqueSentencias(void);
 ASTNode *parseSentencia(void);
+
 ASTNode *parseExpresion(void);
 ASTNode *parseExpresionOR(void);
 ASTNode *parseExpresionAND(void);
@@ -125,7 +139,17 @@ ASTNode *parseExpresionAritmetica(void);
 ASTNode *parseTermino(void);
 ASTNode *parseFactor(void);
 
-ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna);
+ASTNode *crearNodoAST(
+    enum ASTNodeType type,
+    int renglon,
+    int columna
+);
+
 void liberar_ast(ASTNode *node);
-void imprimir_ast(ASTNode *node, int indent_level);
+
+void imprimir_ast(
+    ASTNode *node,
+    int indent_level
+);
+
 #endif

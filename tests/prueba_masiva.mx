@@ -1,0 +1,462 @@
+Tipo Persona {
+    Entero edad;
+    Flotante peso;
+    Cadena nombre;
+};
+
+ Entero suma(Entero a, Entero b) {
+    Retornar a + b;
+}
+
+ Entero doble(Entero x) {
+    Retornar x * 2;
+}
+
+ Entero triple(Entero x) {
+    Retornar x * 3;
+}
+
+ Entero factorial(Entero n) {
+    Si (n <= 1) {
+        Retornar 1;
+    }
+
+    Retornar n * factorial(n - 1);
+}
+
+ Entero complejo(Entero a, Entero b, Entero c) {
+    Entero x = suma(a, b);
+    Entero y = doble(c);
+    Entero z = triple(x + y);
+
+    Retornar (z * factorial(5)) / (x + 1);
+}
+
+Persona p;
+
+p.edad = 25;
+p.peso = 72.5;
+p.nombre = "Carlos";
+
+Entero numeros[10] = {
+    1, 2, 3, 4, 5,
+    6, 7, 8, 9, 10
+};
+
+Entero a = 10;
+Entero b = 20;
+Entero c = 30;
+Entero d = 40;
+Entero e = 50;
+
+a++;
+a--;
+
+b++;
+b--;
+
+a += b;
+a -= c;
+a *= suma(b, c);
+a /= doble(b);
+
+b += suma(
+    suma(
+        suma(1, 2),
+        suma(3, 4)
+    ),
+    suma(
+        suma(5, 6),
+        suma(7, 8)
+    )
+);
+
+c *= doble(
+    triple(
+        suma(
+            a,
+            suma(b, c)
+        )
+    )
+);
+
+d -= suma(
+    doble(
+        triple(d)
+    ),
+    suma(
+        a,
+        b
+    )
+);
+
+e /= doble(
+    suma(
+        doble(a),
+        triple(b)
+    )
+);
+
+a = suma(
+    doble(
+        triple(
+            suma(a, b)
+        )
+    ),
+    complejo(
+        c,
+        d,
+        suma(
+            e,
+            doble(a)
+        )
+    )
+);
+
+b = suma(
+    suma(
+        suma(
+            suma(
+                1,
+                2
+            ),
+            suma(
+                3,
+                4
+            )
+        ),
+        suma(
+            suma(
+                5,
+                6
+            ),
+            suma(
+                7,
+                8
+            )
+        )
+    ),
+    suma(
+        suma(
+            suma(
+                9,
+                10
+            ),
+            suma(
+                11,
+                12
+            )
+        ),
+        suma(
+            suma(
+                13,
+                14
+            ),
+            suma(
+                15,
+                16
+            )
+        )
+    )
+);
+
+c = doble(
+    triple(
+        doble(
+            triple(
+                doble(
+                    triple(
+                        c
+                    )
+                )
+            )
+        )
+    )
+);
+
+numeros[
+    suma(
+        doble(1),
+        triple(1)
+    )
+] = complejo(
+    a,
+    b,
+    c
+);
+
+numeros[
+    suma(
+        suma(1, 1),
+        suma(1, 1)
+    )
+] += suma(
+    doble(a),
+    triple(b)
+);
+
+numeros[
+    doble(
+        suma(
+            1,
+            2
+        )
+    )
+] *= complejo(
+    numeros[1],
+    numeros[2],
+    numeros[3]
+);
+
+Para (Entero i = 0; i < 10; i++) {
+
+    numeros[
+        suma(
+            i,
+            0
+        )
+    ] += complejo(
+        numeros[i],
+        doble(i),
+        triple(
+            suma(i, 1)
+        )
+    );
+
+    Si (
+        numeros[i] > 100 &&
+        (
+            numeros[i] < 1000 ||
+            numeros[i] == 500
+        )
+    ) {
+
+        numeros[i] = doble(
+            triple(
+                suma(
+                    numeros[i],
+                    1
+                )
+            )
+        );
+    }
+    Sino {
+
+        numeros[i] += suma(
+            doble(i),
+            triple(1)
+        );
+    }
+
+    Si (
+        i > 2 &&
+        i < 8 &&
+        (
+            numeros[i] != numeros[i - 1] ||
+            numeros[i] == numeros[i + 1]
+        )
+    ) {
+        Continuar;
+    }
+}
+
+Mientras (
+    a < 100000 &&
+    (
+        b < 200000 ||
+        c > 50
+    )
+) {
+
+    a += suma(
+        doble(b),
+        triple(c)
+    );
+
+    b = doble(
+        suma(
+            a,
+            c
+        )
+    );
+
+    c -= doble(
+        suma(
+            a,
+            b
+        )
+    );
+
+    Si (a > 500000) {
+        Romper;
+    }
+
+    Si (b > 1000000) {
+        Continuar;
+    }
+}
+
+Entero r1 = suma(
+    complejo(
+        suma(
+            doble(1),
+            triple(2)
+        ),
+        factorial(6),
+        suma(
+            factorial(4),
+            factorial(3)
+        )
+    ),
+    suma(
+        complejo(
+            a,
+            b,
+            c
+        ),
+        complejo(
+            d,
+            e,
+            suma(a, b)
+        )
+    )
+);
+
+Entero r2 = doble(
+    suma(
+        triple(
+            complejo(
+                r1,
+                a,
+                b
+            )
+        ),
+        doble(
+            complejo(
+                c,
+                d,
+                e
+            )
+        )
+    )
+);
+
+Entero r3 =
+    suma(
+        suma(
+            suma(
+                doble(
+                    triple(
+                        factorial(5)
+                    )
+                ),
+                complejo(
+                    a,
+                    b,
+                    c
+                )
+            ),
+            suma(
+                complejo(
+                    d,
+                    e,
+                    r1
+                ),
+                complejo(
+                    r2,
+                    r1,
+                    a
+                )
+            )
+        ),
+        suma(
+            triple(
+                suma(
+                    r1,
+                    r2
+                )
+            ),
+            doble(
+                suma(
+                    r2,
+                    r3
+                )
+            )
+        )
+    );
+
+Mostrar(
+    "Edad: ",
+    p.edad,
+    "\n"
+);
+
+Mostrar(
+    "Peso: ",
+    p.peso,
+    "\n"
+);
+
+Mostrar(
+    "Nombre: ",
+    p.nombre,
+    "\n"
+);
+
+Mostrar(
+    "Numero 0: ",
+    numeros[0],
+    "\n"
+);
+
+Mostrar(
+    "Numero 5: ",
+    numeros[
+        suma(
+            2,
+            3
+        )
+    ],
+    "\n"
+);
+
+Mostrar(
+    "Resultado 1: ",
+    r1,
+    "\n"
+);
+
+Mostrar(
+    "Resultado 2: ",
+    r2,
+    "\n"
+);
+
+Mostrar(
+    "Resultado 3: ",
+    r3,
+    "\n"
+);
+
+Mostrar(
+    "Final: ",
+    suma(
+        doble(
+            triple(
+                factorial(5)
+            )
+        ),
+        complejo(
+            r1,
+            r2,
+            suma(
+                a,
+                suma(
+                    b,
+                    c
+                )
+            )
+        )
+    ),
+    "\n"
+);

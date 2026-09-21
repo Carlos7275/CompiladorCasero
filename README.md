@@ -214,8 +214,8 @@ programa.mx
 - `>=` Mayor o igual
 
 ### Lógicos
-- `Y` AND lógico
-- `O` OR lógico
+- `&&` AND lógico
+- `|` OR lógico
 - `No` NOT lógico
 
 ## 📝 Declaraciones Soportadas

@@ -1,0 +1,181 @@
+Flotante a = 5.99999111;
+Flotante b = 123.456789;
+Flotante c = 3.141592653589793;
+Flotante d = 2.718281828459045;
+Flotante e = 99.999999;
+Flotante f = 0.123456789;
+Flotante g = -123.456789;
+Flotante h = -3.141592653589793;
+Flotante i = 1000000.123456;
+Flotante j = 0.00000123456789;
+
+
+/* =========================================
+   PRECISION 0
+   ========================================= */
+
+Mostrar(Decimales(a, 0));
+Mostrar(Decimales(b, 0));
+Mostrar(Decimales(c, 0));
+Mostrar(Decimales(g, 0));
+
+
+/* =========================================
+   PRECISION 1
+   ========================================= */
+
+Mostrar(Decimales(a, 1));
+Mostrar(Decimales(b, 1));
+Mostrar(Decimales(c, 1));
+Mostrar(Decimales(d, 1));
+Mostrar(Decimales(g, 1));
+
+
+/* =========================================
+   PRECISION 2
+   ========================================= */
+
+Mostrar(Decimales(a, 2));
+Mostrar(Decimales(b, 2));
+Mostrar(Decimales(c, 2));
+Mostrar(Decimales(d, 2));
+Mostrar(Decimales(e, 2));
+Mostrar(Decimales(g, 2));
+
+
+/* =========================================
+   PRECISION 3
+   ========================================= */
+
+Mostrar(Decimales(a, 3));
+Mostrar(Decimales(b, 3));
+Mostrar(Decimales(c, 3));
+Mostrar(Decimales(d, 3));
+Mostrar(Decimales(f, 3));
+Mostrar(Decimales(g, 3));
+
+
+/* =========================================
+   PRECISION 4
+   ========================================= */
+
+Mostrar(Decimales(a, 4));
+Mostrar(Decimales(b, 4));
+Mostrar(Decimales(c, 4));
+Mostrar(Decimales(d, 4));
+Mostrar(Decimales(g, 4));
+
+
+/* =========================================
+   PRECISION 5
+   ========================================= */
+
+Mostrar(Decimales(a, 5));
+Mostrar(Decimales(b, 5));
+Mostrar(Decimales(c, 5));
+Mostrar(Decimales(d, 5));
+
+
+/* =========================================
+   PRECISION 6
+   ========================================= */
+
+Mostrar(Decimales(a, 6));
+Mostrar(Decimales(b, 6));
+Mostrar(Decimales(c, 6));
+Mostrar(Decimales(d, 6));
+Mostrar(Decimales(f, 6));
+
+
+/* =========================================
+   PRECISION 8
+   ========================================= */
+
+Mostrar(Decimales(b, 8));
+Mostrar(Decimales(c, 8));
+Mostrar(Decimales(d, 8));
+Mostrar(Decimales(f, 8));
+
+
+/* =========================================
+   NUMEROS NEGATIVOS
+   ========================================= */
+
+Mostrar(Decimales(g, 0));
+Mostrar(Decimales(g, 2));
+Mostrar(Decimales(g, 4));
+Mostrar(Decimales(h, 2));
+Mostrar(Decimales(h, 6));
+
+
+/* =========================================
+   NUMEROS GRANDES
+   ========================================= */
+
+Mostrar(Decimales(i, 0));
+Mostrar(Decimales(i, 2));
+Mostrar(Decimales(i, 4));
+Mostrar(Decimales(i, 6));
+
+
+/* =========================================
+   NUMEROS MUY PEQUEÑOS
+   ========================================= */
+
+Mostrar(Decimales(j, 2));
+Mostrar(Decimales(j, 4));
+Mostrar(Decimales(j, 6));
+Mostrar(Decimales(j, 8));
+
+
+/* =========================================
+   CASOS CLASICOS DE REDONDEO
+   ========================================= */
+
+Flotante r1 = 1.2344;
+Flotante r2 = 1.2345;
+Flotante r3 = 1.2346;
+
+Flotante r4 = 9.994;
+Flotante r5 = 9.995;
+Flotante r6 = 9.996;
+
+Flotante r7 = 99.994;
+Flotante r8 = 99.995;
+Flotante r9 = 99.996;
+
+Mostrar(Decimales(r1, 3));
+Mostrar(Decimales(r2, 3));
+Mostrar(Decimales(r3, 3));
+
+Mostrar(Decimales(r4, 2));
+Mostrar(Decimales(r5, 2));
+Mostrar(Decimales(r6, 2));
+
+Mostrar(Decimales(r7, 2));
+Mostrar(Decimales(r8, 2));
+Mostrar(Decimales(r9, 2));
+
+
+/* =========================================
+   CAMBIOS CONSTANTES DE PRECISION
+   ========================================= */
+
+Mostrar(Decimales(123.456789, 0));
+Mostrar(Decimales(123.456789, 1));
+Mostrar(Decimales(123.456789, 2));
+Mostrar(Decimales(123.456789, 3));
+Mostrar(Decimales(123.456789, 4));
+Mostrar(Decimales(123.456789, 5));
+Mostrar(Decimales(123.456789, 6));
+
+
+/* =========================================
+   TODO JUNTO
+   ========================================= */
+
+Mostrar(Decimales(3.141592653589793, 2));
+Mostrar(Decimales(2.718281828459045, 3));
+Mostrar(Decimales(1.4142135623730951, 4));
+Mostrar(Decimales(0.5772156649015329, 5));
+Mostrar(Decimales(-6.666666666666666, 6));
