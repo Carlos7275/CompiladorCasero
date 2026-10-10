@@ -14,6 +14,12 @@ typedef enum
     IR_MUL,
     IR_DIV,
     IR_MOD,
+    IR_BIT_AND,
+    IR_BIT_OR,
+    IR_BIT_XOR,
+    IR_SHIFT_LEFT,
+    IR_SHIFT_RIGHT,
+    IR_BIT_NOT,
     IR_NEG,
     IR_LT,
     IR_GT,
@@ -40,7 +46,10 @@ typedef enum
     IR_CALL,
     IR_FUNCTION_BEGIN,
     IR_FUNCTION_END,
-    IR_HALT
+    IR_HALT,
+    IR_DEBUG_STEP,
+    IR_THROW,
+    IR_DIV_ZERO_CHECK
 } IROperation;
 
 typedef struct
@@ -52,6 +61,7 @@ typedef struct
 } Quadruple;
 
 void init_ir_generator(void);
+void set_interactive_debugger(int enabled);
 /**
  * @brief Inicia el proceso de generación de código intermedio.
  *

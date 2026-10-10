@@ -1,9 +1,11 @@
 #include "file.h"
+#include "errors.h"
 #include "lexer.h"
 #include "types.h"
 #include <stdlib.h>
 #include <ctype.h>
 int Renglon = 1, Col = 0;
+extern struct nodo *actual;
 
 /**
  * Abre un archivo fuente en modo lectura.
@@ -18,23 +20,32 @@ FILE *leer_archivo(const char *archivo)
 
 void analizar_archivo(FILE *archivo)
 {
+    Renglon = 1;
+    Col = 0;
     int car;
     while ((car = fgetc(archivo)) != EOF)
     {
-        int startColForToken = Col; 
+        int startColForToken = Col;
+        int startLineForToken = Renglon;
+        struct nodo *last_token = actual;
+        int tokenized = 0;
 
         if (isalpha(car))
+        {
             EsID(archivo, car, startColForToken, Renglon);
+            tokenized = 1;
+        }
         else if (car == '/')
         {
             int next_car = fgetc(archivo);
             if (next_car == EOF)
             {
                 EsSimbolo(archivo, car, startColForToken, Renglon);
+                tokenized = 1;
             }
             else if (next_car == '/')
             {
-                Col++;
+                Col += 2;
                 while ((car = fgetc(archivo)) != EOF && car != '\n')
                 {
                     Col++;
@@ -42,13 +53,13 @@ void analizar_archivo(FILE *archivo)
                 if (car == '\n')
                 {
                     Renglon++;
-                    Col = 1;
+                    Col = 0;
                 }
                 continue;
             }
             else if (next_car == '*')
             {
-                Col++;
+                Col += 2;
                 int in_comment = 1;
                 int prev_car = 0;
                 while (in_comment && (car = fgetc(archivo)) != EOF)
@@ -57,7 +68,7 @@ void analizar_archivo(FILE *archivo)
                     if (car == '\n')
                     {
                         Renglon++;
-                        Col = 1;
+                        Col = 0;
                     }
                     if (prev_car == '*' && car == '/')
                     {
@@ -67,7 +78,14 @@ void analizar_archivo(FILE *archivo)
                 }
                 if (in_comment)
                 {
-                    fprintf(stderr, "Error (R%d, C%d): Comentario multi-línea no cerrado.\n", Renglon, Col);
+                    if (diagnostics_json_enabled())
+                    {
+                        report_diagnostic("MX1004", "error", "lexer", Renglon, Col,
+                                          "El comentario de bloque no tiene cierre '*/'.");
+                        emit_diagnostics_json();
+                    }
+                    else
+                        fprintf(stderr, "Error (R%d, C%d): Comentario multi-línea no cerrado.\n", Renglon, Col);
                     exit(EXIT_FAILURE);
                 }
                 continue;
@@ -76,19 +94,49 @@ void analizar_archivo(FILE *archivo)
             {
                 ungetc(next_car, archivo);
                 EsSimbolo(archivo, car, startColForToken, Renglon);
+                tokenized = 1;
             }
         }
         else if (isdigit(car))
+        {
             EsNum(archivo, car, startColForToken, Renglon);
+            tokenized = 1;
+        }
         else if (car == '"')
+        {
             EsCadena(archivo, car, startColForToken, Renglon);
+            tokenized = 1;
+        }
         else if (isascii(car) && car != ' ' && car != '\n' && car != '\r' && car != '\t')
+        {
             EsSimbolo(archivo, car, startColForToken, Renglon);
-        
-        if (car == '\n') {
+            tokenized = 1;
+        }
+
+        if (tokenized && actual != last_token)
+        {
+            actual->info.Renglon = startLineForToken;
+            actual->info.Columna = startColForToken;
+            for (const unsigned char *cursor =
+                     (const unsigned char *)actual->info.Lexema;
+                 *cursor; ++cursor)
+            {
+                if (*cursor == '\n')
+                {
+                    Renglon++;
+                    Col = 0;
+                }
+                else
+                    Col++;
+            }
+        }
+        else if (car == '\n')
+        {
             Renglon++;
-            Col = 1;
-        } else if (isspace(car)) {
+            Col = 0;
+        }
+        else if (isspace(car))
+        {
             Col++;
         }
     }

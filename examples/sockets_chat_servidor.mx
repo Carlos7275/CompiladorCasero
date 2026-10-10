@@ -1,0 +1,34 @@
+Entero servidor = SocketTCPEscuchar(5050, 4);
+Si (servidor < 1) {
+    Lanzar(UltimoError());
+}
+
+Mostrar("Servidor esperando conexion en el puerto 5050...\n");
+Entero conexion = SocketTCPAceptar(servidor);
+SocketCerrar(servidor);
+Si (conexion < 1) {
+    Lanzar(UltimoError());
+}
+
+SocketTimeout(conexion, 60000, 60000);
+Cadena recibido = "";
+Cadena respuesta = "";
+Entero numeroMensaje = 1;
+
+Mientras (numeroMensaje <= 16) {
+    recibido = SocketRecibirLinea(conexion, 255);
+    Mostrar("Recibido #", numeroMensaje, ": ", recibido, "\n");
+    numeroMensaje = numeroMensaje + 1;
+
+    Si (numeroMensaje <= 16) {
+        Mostrar("Tu mensaje #", numeroMensaje, " > ");
+        Leer(respuesta);
+        SocketEnviar(conexion, respuesta);
+        SocketEnviar(conexion, "\n");
+        Mostrar("Enviado #", numeroMensaje, ": ", respuesta, "\n");
+        numeroMensaje = numeroMensaje + 1;
+    }
+}
+
+SocketCerrar(conexion);
+Mostrar("Chat terminado: se completaron 16 mensajes y se cerro la conexion.\n");

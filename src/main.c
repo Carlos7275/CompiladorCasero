@@ -19,6 +19,16 @@
 #define PATH_MAX 32768
 #endif
 
+#ifndef MX_OPENSSL_AVAILABLE
+#define MX_OPENSSL_AVAILABLE 0
+#endif
+#if !MX_OPENSSL_AVAILABLE
+#define MX_OPENSSL_INCLUDE_DIR ""
+#define MX_OPENSSL_SSL_LIBRARY ""
+#define MX_OPENSSL_CRYPTO_LIBRARY ""
+#define MX_OPENSSL_LIBRARY_DIR ""
+#endif
+
 extern struct nodo *raiz;
 extern struct nodo *actual;
 extern struct ErrorSemantico *cabeza_errores;
@@ -35,7 +45,9 @@ typedef struct
     const char *output_name;
     int preserve_asm;
     int debug_mode;
+    int interactive_debugger;
     int execute_binary;
+    int json_diagnostics;
 } CompilerOptions;
 
 /**
@@ -47,8 +59,8 @@ typedef struct
     FILE *source_fp;
     ASTNode *ast;
     TablaSimbolos *symbol_table;
-    char asm_file[256];
-    char obj_file[256];
+    char asm_file[PATH_MAX];
+    char obj_file[PATH_MAX];
 } CompilationContext;
 
 /**
@@ -113,7 +125,9 @@ static int parse_arguments(int argc, const char *argv[], CompilerOptions *opts)
     opts->output_name = "program";
     opts->preserve_asm = 0;
     opts->debug_mode = 0;
+    opts->interactive_debugger = 0;
     opts->execute_binary = 1;
+    opts->json_diagnostics = 0;
 
     if (argc < 2)
     {
@@ -144,9 +158,17 @@ static int parse_arguments(int argc, const char *argv[], CompilerOptions *opts)
         {
             opts->debug_mode = 1;
         }
+        else if (strcmp(arg, "-debugger") == 0)
+        {
+            opts->interactive_debugger = 1;
+        }
         else if (strcmp(arg, "-no-run") == 0)
         {
             opts->execute_binary = 0;
+        }
+        else if (strcmp(arg, "--diagnostics=json") == 0)
+        {
+            opts->json_diagnostics = 1;
         }
         else if (arg[0] == '-')
         {
@@ -387,8 +409,10 @@ static TablaSimbolos *analyze_semantics(ASTNode *ast)
  * @param asm_filepath Ruta donde guardar el archivo .asm
  * @return 0 si es exitoso, -1 en error.
  */
-static int generate_code(ASTNode *ast, TablaSimbolos *table, const char *asm_filepath)
+static int generate_code(ASTNode *ast, TablaSimbolos *table, const char *asm_filepath,
+                         int debugger_enabled)
 {
+    set_interactive_debugger(debugger_enabled);
     generar_codigo_intermedio(ast, table);
 
     FILE *asm_fp = fopen(asm_filepath, "w");
@@ -452,9 +476,32 @@ static int assemble_code(const char *asm_file, const char *obj_file)
  * @param output_name Nombre base del ejecutable.
  * @return 0 si es exitoso, -1 en error.
  */
-static int link_executable(const char *obj_file, const char *output_name)
+static int ir_uses_tls(void)
 {
-    char cmd[512];
+    Quadruple *ir = get_ir_code();
+    for (int i = 0; i < get_ir_code_size(); ++i)
+    {
+        if (ir[i].op != IR_NATIVE_CALL || !ir[i].arg1)
+            continue;
+        if (strncmp(ir[i].arg1, "SocketTLS", 9) == 0 ||
+            strcmp(ir[i].arg1, "HttpTLS") == 0)
+            return 1;
+        if (strcmp(ir[i].arg1, "Http") == 0 && ir[i].arg2)
+        {
+            char args[512];
+            snprintf(args, sizeof(args), "%s", ir[i].arg2);
+            char *url = strtok(args, "|");
+            if (url && strncmp(url, "\"https://", 9) == 0)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+static int link_executable(const char *obj_file, const char *output_name,
+                           int tls_enabled)
+{
+    char cmd[8192];
     int written;
 
     if (!is_safe_command_path(obj_file) || !is_safe_command_path(output_name))
@@ -463,14 +510,46 @@ static int link_executable(const char *obj_file, const char *output_name)
         return -1;
     }
 
+#if !MX_OPENSSL_AVAILABLE
+    if (tls_enabled)
+    {
+        log_error("TLS", "Este compilador se construyo sin OpenSSL 1.1.1+. Instale OpenSSL y reconfigure CMake para habilitar TLS.");
+        return -1;
+    }
+#endif
+
 #if defined(_WIN32)
-    written = snprintf(cmd, sizeof(cmd), "gcc \"%s\" \"runtime/mx_runtime.c\" -o \"%s.exe\" -lm -lws2_32", obj_file, output_name);
+    if (tls_enabled)
+        written = snprintf(cmd, sizeof(cmd),
+                           "gcc \"%s\" \"runtime/mx_runtime.c\" -DMX_OPENSSL_ENABLED=1 "
+                           "-I\"%s\" -o \"%s.exe\" -lm -lws2_32 \"%s\" \"%s\"",
+                           obj_file, MX_OPENSSL_INCLUDE_DIR, output_name,
+                           MX_OPENSSL_SSL_LIBRARY, MX_OPENSSL_CRYPTO_LIBRARY);
+    else
+        written = snprintf(cmd, sizeof(cmd), "gcc \"%s\" \"runtime/mx_runtime.c\" -o \"%s.exe\" -lm -lws2_32", obj_file, output_name);
 #elif defined(__APPLE__)
     const char *link_arch = get_target_link_arch();
-    written = snprintf(cmd, sizeof(cmd), "clang -arch %s -Wl,-w \"%s\" \"runtime/mx_runtime.c\" -o \"%s\" -lm", link_arch, obj_file, output_name);
+    if (tls_enabled)
+        written = snprintf(cmd, sizeof(cmd),
+                           "clang -arch %s -Wl,-w \"%s\" \"runtime/mx_runtime.c\" "
+                           "-DMX_OPENSSL_ENABLED=1 -I\"%s\" -o \"%s\" -lm "
+                           "\"%s\" \"%s\" -Wl,-rpath,\"%s\"",
+                           link_arch, obj_file, MX_OPENSSL_INCLUDE_DIR, output_name,
+                           MX_OPENSSL_SSL_LIBRARY, MX_OPENSSL_CRYPTO_LIBRARY,
+                           MX_OPENSSL_LIBRARY_DIR);
+    else
+        written = snprintf(cmd, sizeof(cmd), "clang -arch %s -Wl,-w \"%s\" \"runtime/mx_runtime.c\" -o \"%s\" -lm", link_arch, obj_file, output_name);
 
 #else
-    written = snprintf(cmd, sizeof(cmd), "gcc \"%s\" \"runtime/mx_runtime.c\" -o \"%s\" -lm", obj_file, output_name);
+    if (tls_enabled)
+        written = snprintf(cmd, sizeof(cmd),
+                           "gcc \"%s\" \"runtime/mx_runtime.c\" -DMX_OPENSSL_ENABLED=1 "
+                           "-I\"%s\" -o \"%s\" -lm \"%s\" \"%s\" -Wl,-rpath,\"%s\"",
+                           obj_file, MX_OPENSSL_INCLUDE_DIR, output_name,
+                           MX_OPENSSL_SSL_LIBRARY, MX_OPENSSL_CRYPTO_LIBRARY,
+                           MX_OPENSSL_LIBRARY_DIR);
+    else
+        written = snprintf(cmd, sizeof(cmd), "gcc \"%s\" \"runtime/mx_runtime.c\" -o \"%s\" -lm", obj_file, output_name);
 #endif
 
     if (written < 0 || (size_t)written >= sizeof(cmd))
@@ -487,10 +566,17 @@ static int link_executable(const char *obj_file, const char *output_name)
 
 #if defined(_WIN32)
     log_success("build", "Compilacion completada: %s.exe", output_name);
-#elif defined(__APPLE__)
-    log_success("build", "Compilacion completada: ./%s (%s)", output_name, link_arch);
 #else
-    log_success("build", "Compilacion completada: ./%s", output_name);
+    char display_path[PATH_MAX + 3];
+    if (output_name[0] == '/' || strchr(output_name, '/') != NULL)
+        snprintf(display_path, sizeof(display_path), "%s", output_name);
+    else
+        snprintf(display_path, sizeof(display_path), "./%s", output_name);
+#if defined(__APPLE__)
+    log_success("build", "Compilacion completada: %s (%s)", display_path, link_arch);
+#else
+    log_success("build", "Compilacion completada: %s", display_path);
+#endif
 #endif
 
     return 0;
@@ -518,7 +604,9 @@ static int run_executable(const char *output_name)
 #ifdef _WIN32
     written = snprintf(cmd, sizeof(cmd), "\"%s.exe\"", output_name);
 #else
-    written = snprintf(cmd, sizeof(cmd), "\"./%s\"", output_name);
+    written = snprintf(cmd, sizeof(cmd), "%s%s%s",
+                       (output_name[0] == '/' || strchr(output_name, '/') != NULL) ? "\"" : "\"./",
+                       output_name, "\"");
 #endif
 
     if (written < 0 || (size_t)written >= sizeof(cmd))
@@ -634,15 +722,26 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
+    set_diagnostics_json(opts.json_diagnostics);
+    set_diagnostic_file(opts.source_file);
+
     ctx.source_fp = leer_archivo(opts.source_file);
     if (ctx.source_fp == NULL)
     {
-        log_error("io", "No se pudo abrir archivo: %s", opts.source_file);
+        if (opts.json_diagnostics)
+        {
+            report_diagnosticf("MX0001", "error", "compiler", 1, 0,
+                               "No se pudo abrir el archivo '%s'.", opts.source_file);
+            emit_diagnostics_json();
+        }
+        else
+            log_error("io", "No se pudo abrir archivo: %s", opts.source_file);
         return EXIT_FAILURE;
     }
 
     cargar_dotenv(opts.source_file);
     ctx.ast = parse_source_file(ctx.source_fp);
+    ctx.source_fp = NULL;
     if (ctx.ast == NULL)
     {
         log_error("parser", "Fallo el analisis sintactico");
@@ -662,19 +761,36 @@ int main(int argc, const char *argv[])
     ctx.symbol_table = analyze_semantics(ctx.ast);
     if (ctx.symbol_table == NULL)
     {
-        log_error("semantic", "Fallo el analisis semantico");
+        if (!opts.json_diagnostics)
+            log_error("semantic", "Fallo el analisis semantico");
         free_compilation_context(&ctx);
         return EXIT_FAILURE;
     }
 
-    snprintf(ctx.asm_file, sizeof(ctx.asm_file), "%s.asm", opts.output_name);
-    snprintf(ctx.obj_file, sizeof(ctx.obj_file), "%s.o", opts.output_name);
+    if (opts.json_diagnostics)
+    {
+        emit_diagnostics_json();
+        free_compilation_context(&ctx);
+        return EXIT_SUCCESS;
+    }
+
+    int asm_path_length = snprintf(ctx.asm_file, sizeof(ctx.asm_file), "%s.asm", opts.output_name);
+    int obj_path_length = snprintf(ctx.obj_file, sizeof(ctx.obj_file), "%s.o", opts.output_name);
 
 #if defined(_WIN32)
-    snprintf(ctx.obj_file, sizeof(ctx.obj_file), "%s.obj", opts.output_name);
+    obj_path_length = snprintf(ctx.obj_file, sizeof(ctx.obj_file), "%s.obj", opts.output_name);
 #endif
+    if (asm_path_length < 0 || obj_path_length < 0 ||
+        (size_t)asm_path_length >= sizeof(ctx.asm_file) ||
+        (size_t)obj_path_length >= sizeof(ctx.obj_file))
+    {
+        log_error("io", "La ruta de salida excede el limite soportado");
+        free_compilation_context(&ctx);
+        return EXIT_FAILURE;
+    }
 
-    if (generate_code(ctx.ast, ctx.symbol_table, ctx.asm_file) != 0)
+    if (generate_code(ctx.ast, ctx.symbol_table, ctx.asm_file,
+                      opts.interactive_debugger) != 0)
     {
         cleanup_intermediates(ctx.asm_file, ctx.obj_file, opts.preserve_asm);
         free_compilation_context(&ctx);
@@ -688,7 +804,7 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
 
-    if (link_executable(ctx.obj_file, opts.output_name) != 0)
+    if (link_executable(ctx.obj_file, opts.output_name, ir_uses_tls()) != 0)
     {
         cleanup_intermediates(ctx.asm_file, ctx.obj_file, opts.preserve_asm);
         free_compilation_context(&ctx);

@@ -1,0 +1,12 @@
+Entero salida = AbrirArchivo("tests/.mx_io_test.tmp", "w");
+EscribirArchivo(salida, "linea uno\nlinea dos\n");
+CerrarArchivo(salida);
+
+Entero entrada = AbrirArchivo("tests/.mx_io_test.tmp", "r");
+Cadena primera = LeerLinea(entrada);
+Mostrar(primera);
+Mostrar(FinArchivo(entrada), "\n");
+Cadena resto = LeerTodoArchivo(entrada);
+Mostrar(resto);
+CerrarArchivo(entrada);
+EliminarArchivo("tests/.mx_io_test.tmp");

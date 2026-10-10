@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include "types.h"
 
+struct TablaSimbolos;
+
 enum ASTNodeType
 {
     AST_PROGRAMA,
@@ -44,6 +46,12 @@ enum ASTNodeType
     AST_MULT_EXPR,
     AST_DIV_EXPR,
     AST_MOD_EXPR,
+    AST_BIT_AND_EXPR,
+    AST_BIT_OR_EXPR,
+    AST_BIT_XOR_EXPR,
+    AST_SHIFT_LEFT_EXPR,
+    AST_SHIFT_RIGHT_EXPR,
+    AST_BIT_NOT_EXPR,
     AST_NEGACION_UNARIA_EXPR,
 
     AST_IDENTIFICADOR,
@@ -56,6 +64,8 @@ enum ASTNodeType
     AST_FUNCION,
     AST_LLAMADA,
     AST_RETORNAR_STMT,
+    AST_TRY_STMT,
+    AST_THROW_STMT,
     AST_IMPORT,
 
     AST_ACCESO_ARRAY,
@@ -97,6 +107,8 @@ typedef struct ASTNode
     char *ir_result_name;
 
     struct ASTNode *parametros;
+
+    struct TablaSimbolos *symbol_scope;
 
     enum TipoDato return_type;
 

@@ -31,17 +31,18 @@ echo -e "${BLUE}VALIDACION INTEGRAL DEL COMPILADOR${NC}"
 echo -e "${BLUE}Versión 1.0 - Suite de Pruebas${NC}"
 echo -e "${BLUE}=====================================${NC}\n"
 
-# Verificar que el compilador existe
+# Reconstruir siempre para evitar ejecutar un compilador desactualizado.
+if ! cmake -S . -B build -DCMAKE_BUILD_TYPE=Release; then
+    echo -e "${RED}ERROR: No se pudo configurar el compilador.${NC}" >&2
+    exit 1
+fi
+if ! cmake --build build --config Release; then
+    echo -e "${RED}ERROR: No se pudo compilar el compilador.${NC}" >&2
+    exit 1
+fi
 if [ ! -f "$COMPILADOR" ]; then
-    echo -e "${RED}ERROR: Compilador no encontrado en $COMPILADOR${NC}"
-    echo "Compilando primero..."
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release > /dev/null 2>&1
-    cmake --build build --config Release > /dev/null 2>&1
-    
-    if [ ! -f "$COMPILADOR" ]; then
-        echo -e "${RED}No se pudo compilar el compilador.${NC}"
-        exit 1
-    fi
+    echo -e "${RED}ERROR: Compilador no encontrado en $COMPILADOR${NC}" >&2
+    exit 1
 fi
 
 # Función para ejecutar un programa con entrada automática si es necesario

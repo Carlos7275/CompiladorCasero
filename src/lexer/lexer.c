@@ -1,10 +1,11 @@
 #include "lexer.h"
 #include "types.h"
+#include "errors.h"
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 
-const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante", "Void", "void", "Retornar", "Importar"};
+const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante", "Void", "void", "Retornar", "Importar", "Intentar", "Capturar", "Lanzar"};
 
 /**
  * Reconoce un identificador o palabra reservada.
@@ -82,7 +83,14 @@ void EsCadena(FILE *archivo, char car, int Col, int Renglon)
     }
     else
     {
-        printf("Error en la cadena: falta cerrar la comilla doble (\")\n");
+        if (diagnostics_json_enabled())
+        {
+            report_diagnostic("MX1001", "error", "lexer", Renglon, Col,
+                              "La cadena de texto no tiene comilla de cierre.");
+            emit_diagnostics_json();
+        }
+        else
+            printf("Error en la cadena: falta cerrar la comilla doble (\")\n");
         exit(1);
     }
 }
@@ -124,7 +132,15 @@ void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
         }
         else if (next_char == '.' && cantPuntos == 1)
         {
-            fprintf(stderr, "Error (R%d, C%d): un número no puede tener más de un punto decimal\n", Renglon, Col);
+            if (diagnostics_json_enabled())
+            {
+                report_diagnostic("MX1002", "error", "lexer", Renglon,
+                                  Col + (int)strlen(lexema),
+                                  "El numero tiene mas de un punto decimal.");
+                emit_diagnostics_json();
+            }
+            else
+                fprintf(stderr, "Error (R%d, C%d): un número no puede tener más de un punto decimal\n", Renglon, Col);
             exit(EXIT_FAILURE);
         }
         // Caracteres que DEBEN terminar el número pero NO son parte de él
@@ -143,7 +159,15 @@ void EsNum(FILE *arch, char car_inicial, int Col, int Renglon)
         }
         else
         {
-            fprintf(stderr, "Error (R%d, C%d): carácter inválido '%c' en número\n", Renglon, Col, next_char);
+            if (diagnostics_json_enabled())
+            {
+                report_diagnosticf("MX1003", "error", "lexer", Renglon,
+                                   Col + (int)strlen(lexema),
+                                   "El caracter '%c' no es valido dentro de un numero.", next_char);
+                emit_diagnostics_json();
+            }
+            else
+                fprintf(stderr, "Error (R%d, C%d): carácter inválido '%c' en número\n", Renglon, Col, next_char);
             exit(EXIT_FAILURE);
         }
     }
@@ -195,7 +219,7 @@ enum TipoDato EsPalabraReservadaConTipo(const char *lexema, enum TipoToken *out_
  */
 void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
 {
-    char lexema[3] = {0};
+    char lexema[4] = {0};
     int next_char_val;
 
     lexema[0] = car_inicial;
@@ -303,7 +327,23 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
     case '>':
         next_char_val = fgetc(archivo);
 
-        if (next_char_val == '=')
+        if (next_char_val == car_inicial)
+        {
+            lexema[1] = (char)next_char_val;
+            int after_shift = fgetc(archivo);
+            if (after_shift == '=')
+            {
+                lexema[2] = '=';
+                generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
+            }
+            else
+            {
+                if (after_shift != EOF)
+                    ungetc(after_shift, archivo);
+                generarToken(OPAR, lexema, OTRO, Col, Renglon);
+            }
+        }
+        else if (next_char_val == '=')
         {
             lexema[1] = '=';
             generarToken(OPCOMP, lexema, OTRO, Col, Renglon);
@@ -325,15 +365,16 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[1] = '&';
             generarToken(OPLOG, lexema, OTRO, Col, Renglon);
         }
+        else if (next_char_val == '=')
+        {
+            lexema[1] = '=';
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
+        }
         else
         {
             if (next_char_val != EOF)
                 ungetc(next_char_val, archivo);
-
-            fprintf(stderr,
-                    "Error (R%d, C%d): Símbolo inesperado '&'. Se esperaba '&&'.\n",
-                    Renglon, Col);
-            exit(EXIT_FAILURE);
+            generarToken(OPAR, lexema, OTRO, Col, Renglon);
         }
         break;
 
@@ -345,16 +386,35 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
             lexema[1] = '|';
             generarToken(OPLOG, lexema, OTRO, Col, Renglon);
         }
+        else if (next_char_val == '=')
+        {
+            lexema[1] = '=';
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
+        }
         else
         {
             if (next_char_val != EOF)
                 ungetc(next_char_val, archivo);
-
-            fprintf(stderr,
-                    "Error (R%d, C%d): Símbolo inesperado '|'. Se esperaba '||'.\n",
-                    Renglon, Col);
-            exit(EXIT_FAILURE);
+            generarToken(OPAR, lexema, OTRO, Col, Renglon);
         }
+        break;
+
+    case '^':
+        next_char_val = fgetc(archivo);
+        if (next_char_val == '=')
+        {
+            lexema[1] = '=';
+            generarToken(OPASIGN, lexema, OTRO, Col, Renglon);
+        }
+        else
+        {
+            if (next_char_val != EOF)
+                ungetc(next_char_val, archivo);
+            generarToken(OPAR, lexema, OTRO, Col, Renglon);
+        }
+        break;
+    case '~':
+        generarToken(OPAR, lexema, OTRO, Col, Renglon);
         break;
 
     case '[':
@@ -372,9 +432,16 @@ void EsSimbolo(FILE *archivo, char car_inicial, int Col, int Renglon)
         break;
 
     case '"':
-        fprintf(stderr,
-                "Error (R%d, C%d): Comilla doble inesperada aquí.\n",
-                Renglon, Col);
+        if (diagnostics_json_enabled())
+        {
+            report_diagnostic("MX1005", "error", "lexer", Renglon, Col,
+                              "Se encontro una comilla doble inesperada.");
+            emit_diagnostics_json();
+        }
+        else
+            fprintf(stderr,
+                    "Error (R%d, C%d): Comilla doble inesperada aquí.\n",
+                    Renglon, Col);
         exit(EXIT_FAILURE);
         break;
 

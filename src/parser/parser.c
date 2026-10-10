@@ -7,10 +7,43 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include "errors.h"
 
 extern struct nodo *raiz;
 
 struct nodo *token_actual_parser;
+static struct nodo *ultimo_token_consumido;
+static ASTNode *parseExpresionBitwiseOR(void);
+
+static int parser_fprintf(FILE *stream, const char *fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    if (stream == stderr && diagnostics_json_enabled())
+    {
+        char message[512];
+        vsnprintf(message, sizeof(message), fmt, args);
+        va_end(args);
+        message[strcspn(message, "\r\n")] = '\0';
+        struct Token *token = peekToken();
+        int line = token ? token->Renglon :
+                   (ultimo_token_consumido
+                        ? ultimo_token_consumido->info.Renglon : 1);
+        int column = token ? token->Columna :
+                     (ultimo_token_consumido
+                          ? ultimo_token_consumido->info.Columna +
+                                (int)strlen(ultimo_token_consumido->info.Lexema)
+                          : 0);
+        report_diagnostic("MX2001", "error", "parser", line, column, message);
+        emit_diagnostics_json();
+        return 0;
+    }
+    int result = vfprintf(stream, fmt, args);
+    va_end(args);
+    return result;
+}
+
+#define fprintf parser_fprintf
 
 /**
  * Inicializa el parser apuntando al primer token del flujo de entrada.
@@ -18,6 +51,7 @@ struct nodo *token_actual_parser;
 void iniciarParser(void)
 {
     token_actual_parser = raiz;
+    ultimo_token_consumido = NULL;
 }
 
 /**
@@ -43,6 +77,7 @@ struct Token *consumirToken(void)
 {
     if (token_actual_parser != NULL)
     {
+        ultimo_token_consumido = token_actual_parser;
         struct Token *token_consumido = &(token_actual_parser->info);
 
         token_actual_parser = token_actual_parser->der;
@@ -63,15 +98,36 @@ void match(enum TipoToken tipo_esperado, const char *lexema_esperado)
 
     if (actual_token == NULL)
     {
+        struct nodo *previous = ultimo_token_consumido;
+        int line = previous ? previous->info.Renglon : 1;
+        int column = previous
+                         ? previous->info.Columna +
+                               (int)strlen(previous->info.Lexema)
+                         : 0;
+        if (diagnostics_json_enabled())
+        {
+            report_diagnosticf("MX2001", "error", "parser", line, column,
+                               "El archivo termino antes de completar la instruccion; se esperaba %s.",
+                               lexema_esperado ? lexema_esperado : "otro elemento");
+            emit_diagnostics_json();
+            exit(EXIT_FAILURE);
+        }
         fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba TipoToken %d ('%s'), pero se encontró el fin del archivo (EOF) inesperadamente.\n",
-                (token_actual_parser && token_actual_parser->izq) ? token_actual_parser->izq->info.Renglon : 1,
-                (token_actual_parser && token_actual_parser->izq) ? token_actual_parser->izq->info.Columna : 1,
+                line, column,
                 tipo_esperado, lexema_esperado ? lexema_esperado : "Cualquier Lexema");
         exit(EXIT_FAILURE);
     }
 
     if (actual_token->TipoToken != tipo_esperado)
     {
+        if (diagnostics_json_enabled())
+        {
+            report_diagnosticf("MX2001", "error", "parser",
+                               actual_token->Renglon, actual_token->Columna,
+                               "Token inesperado '%s'.", actual_token->Lexema);
+            emit_diagnostics_json();
+            exit(EXIT_FAILURE);
+        }
         fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba TipoToken %d, se encontró TipoToken %d (Lexema: '%s').\n",
                 actual_token->Renglon, actual_token->Columna,
                 tipo_esperado, actual_token->TipoToken, actual_token->Lexema);
@@ -80,6 +136,15 @@ void match(enum TipoToken tipo_esperado, const char *lexema_esperado)
 
     if (lexema_esperado != NULL && strcmp(actual_token->Lexema, lexema_esperado) != 0)
     {
+        if (diagnostics_json_enabled())
+        {
+            report_diagnosticf("MX2001", "error", "parser",
+                               actual_token->Renglon, actual_token->Columna,
+                               "Se esperaba '%s', pero se encontro '%s'.",
+                               lexema_esperado, actual_token->Lexema);
+            emit_diagnostics_json();
+            exit(EXIT_FAILURE);
+        }
         fprintf(stderr, "Error de sintaxis en (R%d, C%d): Se esperaba el lexema '%s', se encontró '%s'.\n",
                 actual_token->Renglon, actual_token->Columna, lexema_esperado, actual_token->Lexema);
         exit(EXIT_FAILURE);
@@ -122,6 +187,7 @@ ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
     newNode->declared_type_info = -1;
     newNode->ir_result_name = NULL;
     newNode->parametros = NULL;
+    newNode->symbol_scope = NULL;
     newNode->return_type = TIPO_ERROR;
     newNode->tipo_nombre = NULL;
 
@@ -277,6 +343,74 @@ ASTNode *parseSentenciaODeclaracion(void)
         }
         match(ESPECIAL, ";");
         return node;
+    }
+
+    if (token_inicio_sentencia->TipoToken == PalRes &&
+        strcmp(token_inicio_sentencia->Lexema, "Intentar") == 0)
+    {
+        struct Token *try_token = consumirToken();
+        ASTNode *try_node = crearNodoAST(AST_TRY_STMT, try_token->Renglon, try_token->Columna);
+        match(ESPECIAL, "{");
+        try_node->hijo_izq = parseBloqueSentencias();
+        match(ESPECIAL, "}");
+        if (!peekToken() || strcmp(peekToken()->Lexema, "Capturar") != 0)
+        {
+            fprintf(stderr, "Error de sintaxis (R%d, C%d): Intentar requiere un bloque Capturar.\n",
+                    try_token->Renglon, try_token->Columna);
+            exit(EXIT_FAILURE);
+        }
+        consumirToken();
+        struct Token *capture_token = NULL;
+        if (peekToken() && peekToken()->TipoToken == ESPECIAL &&
+            strcmp(peekToken()->Lexema, "(") == 0)
+        {
+            match(ESPECIAL, "(");
+            capture_token = peekToken();
+            match(ID, NULL);
+            match(ESPECIAL, ")");
+        }
+        match(ESPECIAL, "{");
+        try_node->hijo_der = parseBloqueSentencias();
+        match(ESPECIAL, "}");
+        if (capture_token)
+        {
+            ASTNode *capture_variable = crearNodoAST(
+                AST_DECLARACION_VAR,
+                capture_token->Renglon,
+                capture_token->Columna);
+            capture_variable->declared_type_info = STRING;
+            capture_variable->hijo_izq = crearNodoAST(
+                AST_IDENTIFICADOR,
+                capture_token->Renglon,
+                capture_token->Columna);
+            capture_variable->hijo_izq->valor.nombre_id = strdup(capture_token->Lexema);
+
+            ASTNode *message_call = crearNodoAST(
+                AST_LLAMADA,
+                capture_token->Renglon,
+                capture_token->Columna);
+            message_call->hijo_izq = crearNodoAST(
+                AST_IDENTIFICADOR,
+                capture_token->Renglon,
+                capture_token->Columna);
+            message_call->hijo_izq->valor.nombre_id = strdup("UltimoError");
+            capture_variable->hijo_der = message_call;
+
+            capture_variable->siguiente_hermano = try_node->hijo_der->hijo_izq;
+            try_node->hijo_der->hijo_izq = capture_variable;
+        }
+        return try_node;
+    }
+    if (token_inicio_sentencia->TipoToken == PalRes &&
+        strcmp(token_inicio_sentencia->Lexema, "Lanzar") == 0)
+    {
+        struct Token *throw_token = consumirToken();
+        ASTNode *throw_node = crearNodoAST(AST_THROW_STMT, throw_token->Renglon, throw_token->Columna);
+        match(ESPECIAL, "(");
+        throw_node->hijo_izq = parseExpresion();
+        match(ESPECIAL, ")");
+        match(ESPECIAL, ";");
+        return throw_node;
     }
 
     if ((token_inicio_sentencia->TipoToken == PalRes || token_inicio_sentencia->TipoToken == ID))
@@ -751,6 +885,7 @@ ASTNode *clonarSubarbol(const ASTNode *node)
         copy->ir_result_name = strdup(node->ir_result_name);
 
     copy->parametros = clonarSubarbol(node->parametros);
+    copy->symbol_scope = node->symbol_scope;
     copy->hijo_izq = clonarSubarbol(node->hijo_izq);
     copy->hijo_der = clonarSubarbol(node->hijo_der);
     copy->siguiente_hermano = NULL;
@@ -915,7 +1050,12 @@ ASTNode *parseAsignacion(void)
          strcmp(next->Lexema, "-=") == 0 ||
          strcmp(next->Lexema, "*=") == 0 ||
          strcmp(next->Lexema, "/=") == 0 ||
-         strcmp(next->Lexema, "%=") == 0))
+         strcmp(next->Lexema, "%=") == 0 ||
+         strcmp(next->Lexema, "&=") == 0 ||
+         strcmp(next->Lexema, "|=") == 0 ||
+         strcmp(next->Lexema, "^=") == 0 ||
+         strcmp(next->Lexema, "<<=") == 0 ||
+         strcmp(next->Lexema, ">>=") == 0))
     {
         struct Token *op_token = consumirToken();
 
@@ -955,8 +1095,18 @@ ASTNode *parseAsignacion(void)
             op_node = crearNodoAST(AST_MULT_EXPR, op_token->Renglon, op_token->Columna);
         else if (strcmp(op_token->Lexema, "/=") == 0)
             op_node = crearNodoAST(AST_DIV_EXPR, op_token->Renglon, op_token->Columna);
-        else
+        else if (strcmp(op_token->Lexema, "%=") == 0)
             op_node = crearNodoAST(AST_MOD_EXPR, op_token->Renglon, op_token->Columna);
+        else if (strcmp(op_token->Lexema, "&=") == 0)
+            op_node = crearNodoAST(AST_BIT_AND_EXPR, op_token->Renglon, op_token->Columna);
+        else if (strcmp(op_token->Lexema, "|=") == 0)
+            op_node = crearNodoAST(AST_BIT_OR_EXPR, op_token->Renglon, op_token->Columna);
+        else if (strcmp(op_token->Lexema, "^=") == 0)
+            op_node = crearNodoAST(AST_BIT_XOR_EXPR, op_token->Renglon, op_token->Columna);
+        else if (strcmp(op_token->Lexema, "<<=") == 0)
+            op_node = crearNodoAST(AST_SHIFT_LEFT_EXPR, op_token->Renglon, op_token->Columna);
+        else
+            op_node = crearNodoAST(AST_SHIFT_RIGHT_EXPR, op_token->Renglon, op_token->Columna);
 
         op_node->hijo_izq = lhs_value;
         op_node->hijo_der = rhs_expr;
@@ -1263,7 +1413,7 @@ ASTNode *parseExpresionOR(void)
 
 ASTNode *parseExpresionAND(void)
 {
-    ASTNode *left_expr = parseExpresionNOT();
+    ASTNode *left_expr = parseExpresionBitwiseOR();
 
     struct Token *op_token = peekToken();
     while (op_token != NULL && op_token->TipoToken == OPLOG && strcmp(op_token->Lexema, "&&") == 0)
@@ -1271,7 +1421,7 @@ ASTNode *parseExpresionAND(void)
         consumirToken();
         ASTNode *new_expr_node = crearNodoAST(AST_AND_EXPR, op_token->Renglon, op_token->Columna);
         new_expr_node->hijo_izq = left_expr;
-        new_expr_node->hijo_der = parseExpresionNOT();
+        new_expr_node->hijo_der = parseExpresionBitwiseOR();
         if (new_expr_node->hijo_der == NULL)
         {
             fprintf(stderr, "Error de sintaxis (R%d, C%d): Se esperaba una expresión después del operador 'AND'.\n",
@@ -1286,38 +1436,68 @@ ASTNode *parseExpresionAND(void)
 }
 ASTNode *parseExpresionNOT(void)
 {
-    struct Token *current_token = peekToken();
+    return parseFactor();
+}
 
-    if (current_token != NULL &&
-        current_token->TipoToken == OPLOG &&
-        strcmp(current_token->Lexema, "!") == 0)
+static ASTNode *parse_binario_bitwise(ASTNode *left, const char *const *operators,
+                                      const enum ASTNodeType *types, size_t count,
+                                      ASTNode *(*parse_next)(void))
+{
+    struct Token *token = peekToken();
+    while (token && token->TipoToken == OPAR)
     {
+        size_t i = 0;
+        while (i < count && strcmp(token->Lexema, operators[i]) != 0)
+            ++i;
+        if (i == count)
+            break;
         consumirToken();
-
-        ASTNode *not_expr_node =
-            crearNodoAST(AST_NOT_EXPR,
-                         current_token->Renglon,
-                         current_token->Columna);
-
-        not_expr_node->hijo_izq = parseExpresionNOT();
-
-        if (not_expr_node->hijo_izq == NULL)
+        ASTNode *binary = crearNodoAST(types[i], token->Renglon, token->Columna);
+        binary->hijo_izq = left;
+        binary->hijo_der = parse_next();
+        if (!binary->hijo_der)
         {
-            fprintf(stderr,
-                    "Error de sintaxis (R%d, C%d): Se esperaba una expresión después de 'NOT'.\n",
-                    current_token->Renglon,
-                    current_token->Columna);
+            fprintf(stderr, "Error de sintaxis (R%d, C%d): falta operando despues de '%s'.\n",
+                    token->Renglon, token->Columna, token->Lexema);
             exit(EXIT_FAILURE);
         }
-
-        return not_expr_node;
+        left = binary;
+        token = peekToken();
     }
+    return left;
+}
 
-    return parseExpresionComparacion();
+static ASTNode *parse_shift(void)
+{
+    static const char *const ops[] = {"<<", ">>"};
+    static const enum ASTNodeType types[] = {AST_SHIFT_LEFT_EXPR, AST_SHIFT_RIGHT_EXPR};
+    return parse_binario_bitwise(parseExpresionAritmetica(), ops, types, 2,
+                                 parseExpresionAritmetica);
+}
+
+static ASTNode *parse_bitwise_and(void)
+{
+    static const char *const ops[] = {"&"};
+    static const enum ASTNodeType types[] = {AST_BIT_AND_EXPR};
+    return parse_binario_bitwise(parseExpresionComparacion(), ops, types, 1, parseExpresionComparacion);
+}
+
+static ASTNode *parse_bitwise_xor(void)
+{
+    static const char *const ops[] = {"^"};
+    static const enum ASTNodeType types[] = {AST_BIT_XOR_EXPR};
+    return parse_binario_bitwise(parse_bitwise_and(), ops, types, 1, parse_bitwise_and);
+}
+
+static ASTNode *parseExpresionBitwiseOR(void)
+{
+    static const char *const ops[] = {"|"};
+    static const enum ASTNodeType types[] = {AST_BIT_OR_EXPR};
+    return parse_binario_bitwise(parse_bitwise_xor(), ops, types, 1, parse_bitwise_xor);
 }
 ASTNode *parseExpresionComparacion(void)
 {
-    ASTNode *left_expr = parseExpresionAritmetica();
+    ASTNode *left_expr = parse_shift();
 
     struct Token *op_token = peekToken();
     if (op_token != NULL && op_token->TipoToken == OPCOMP)
@@ -1355,7 +1535,7 @@ ASTNode *parseExpresionComparacion(void)
 
         consumirToken();
 
-        ASTNode *right_expr = parseExpresionAritmetica();
+        ASTNode *right_expr = parse_shift();
 
         ASTNode *newNode = crearNodoAST(comparison_type, op_token->Renglon, op_token->Columna);
 
@@ -1666,7 +1846,21 @@ ASTNode *parseFactor(void)
 
     case ESPECIAL:
     case OPAR:
-        if (strcmp(current_token->Lexema, "-") == 0)
+    case OPLOG:
+        if (current_token->TipoToken == OPLOG &&
+            strcmp(current_token->Lexema, "!") == 0)
+        {
+            consumirToken();
+            node = crearNodoAST(AST_NOT_EXPR, current_token->Renglon, current_token->Columna);
+            node->hijo_izq = parseFactor();
+        }
+        else if (strcmp(current_token->Lexema, "~") == 0)
+        {
+            match(OPAR, "~");
+            node = crearNodoAST(AST_BIT_NOT_EXPR, current_token->Renglon, current_token->Columna);
+            node->hijo_izq = parseFactor();
+        }
+        else if (strcmp(current_token->Lexema, "-") == 0)
         {
             match(current_token->TipoToken, "-");
 

@@ -1,0 +1,11 @@
+Entero udp = SocketUDP(0);
+Entero puerto = SocketPuertoLocal(udp);
+Booleano timeoutConfigurado = SocketTimeout(udp, 1000, 1000);
+Entero enviados = SocketEnviarUDP(udp, "127.0.0.1", puerto, "mensaje UDP");
+Cadena recibido = SocketRecibirUDP(udp, 128);
+Cadena remoto = SocketDireccionRemota(udp);
+
+Mostrar(timeoutConfigurado, " ", enviados, " ", recibido, " ", remoto, " ", UltimoError(), "\n");
+SocketCerrar(udp);
+Entero udpInvalido = SocketUDP(70000);
+Mostrar(udpInvalido, " ", UltimoError(), "\n");

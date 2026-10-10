@@ -11,6 +11,10 @@ Un compilador de propósito educativo para el lenguaje **Mx**, compilado complet
 - **Gestión de Errores Robusta**: Reportes de error estructurados en todas las fases
 - **Sistema de Símbolos Jerarquizado**: Soporte para scopes anidados y resolución de variables
 - **Optimización de IR**: Eliminación de código muerto en el código intermedio
+- **Archivos**: apertura en modos de lectura/escritura, lectura por línea o completa y escritura
+- **Depuración interactiva**: ejecución paso a paso, continuación y breakpoints por línea
+- **Excepciones**: bloques `Intentar`/`Capturar`, `Lanzar` y lectura del último mensaje
+- **Operadores bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>` y sus asignaciones compuestas
 
 ## 📋 Requisitos
 
@@ -24,6 +28,11 @@ Un compilador de propósito educativo para el lenguaje **Mx**, compilado complet
 - macOS 10.15+
 - Ubuntu 18.04+ / Debian 10+
 - Windows 10+ (con MSVC o MinGW)
+
+El backend genera x86-64. En equipos x86-64 se ejecuta de forma nativa; en
+Apple Silicon se requiere Rosetta 2 para ejecutar los binarios generados.
+TLS usa OpenSSL 1.1.1 o posterior; es una dependencia opcional y solo se enlaza
+en programas Mx que solicitan funciones TLS o `HttpTLS`.
 
 ## 🔧 Compilación
 
@@ -58,6 +67,8 @@ cmake --build build --config Release
 Opciones:
   -asm          conserva el archivo .asm generado
   -debug        muestra AST, tabla de símbolos, IR y ASM
+  -debugger     pausa en cada sentencia; comandos s, c, b LINEA, q
+  --diagnostics=json valida el archivo y emite diagnosticos estructurados
   -no-run       compila sin ejecutar el ejecutable
   -version      muestra la versión del compilador
   -help         muestra esta ayuda
@@ -73,7 +84,39 @@ Opciones:
 
 # Conservar el ASM generado
 ./build/bin/compilador tests/ejemplo1.mx mi_programa -asm
+
+# Depurar interactivamente (s=paso, c=continuar, b 12=breakpoint, q=salir)
+./build/bin/compilador tests/ejemplo1.mx mi_programa -debugger
+
+# Obtener diagnosticos JSON para integracion con IDE
+./build/bin/compilador archivo.mx --diagnostics=json
 ```
+
+`--diagnostics=json` ejecuta el lexer, parser y analisis semantico sin generar
+ni ejecutar un binario. Imprime un unico objeto JSON por `stdout`, incluso
+cuando no hay errores:
+
+```json
+{
+  "file": "archivo.mx",
+  "diagnostics": [{
+    "range": {
+      "start": { "line": 2, "character": 8 },
+      "end": { "line": 2, "character": 9 }
+    },
+    "severity": 1,
+    "code": "MX3000",
+    "source": "semantic",
+    "message": "Variable no declarada: 'total'"
+  }]
+}
+```
+
+Las posiciones de `range` usan indices desde cero; `severity` sigue la
+convencion LSP (`1` error, `2` advertencia, `3` informacion, `4` sugerencia).
+Los codigos `MX1xxx`, `MX2xxx` y `MX3xxx` identifican diagnosticos del lexer,
+parser y analisis semantico. `stdout` queda reservado para el JSON; los
+registros generales del compilador siguen en `stderr`.
 
 ### Bibliotecas propias
 Un programa puede incorporar otro archivo Mx con una ruta relativa al archivo
@@ -98,7 +141,7 @@ Ejemplos adicionales:
 ## 🧪 Ejecución de Pruebas
 
 ```bash
-# Ejecutar todas las pruebas (13 programas)
+# Ejecutar todos los programas de prueba
 ./run_tests.sh
 
 # Ejecutar prueba individual
@@ -119,6 +162,8 @@ Ejemplos adicionales:
 - `suma.mx` - Suma acumulativa
 - `tablas.mx` - Tabla de multiplicación
 - `temperatura.mx` - Cálculo de área y conversión
+- `archivos_basico.mx` - Lectura, escritura, modos y cierre de archivos
+- `operadores_nuevos.mx` - Bitwise, conversiones booleanas y excepciones
 
 ## 💡 Ejemplo de Programa Mx
 
@@ -157,7 +202,7 @@ Mostrar("Factorial de ", n, " es ", fact, "\n");
 │   ├── utils/              # Utilidades (I/O, tipos)
 │   ├── errors/             # Manejo de errores
 │   └── include/            # Headers públicos
-├── tests/                  # Programas de prueba (13 ejemplos)
+├── tests/                  # Programas de prueba Mx
 ├── build/                  # Artefactos de compilación
 ├── CMakeLists.txt          # Configuración CMake
 ├── build.sh               # Script de compilación (Unix)
@@ -195,6 +240,153 @@ programa.mx
 | `Flotante` | Punto flotante (64-bit) | IEEE 754 |
 | `Cadena` | Cadena de caracteres | Hasta 256 caracteres |
 | `Booleano` | Valor lógico (0/1) | 0 o 1 |
+
+Las condiciones aceptan `Booleano` y `Entero` al estilo C: cero es falso y
+cualquier valor distinto de cero es verdadero. Al asignar un entero a un
+booleano, el valor se normaliza a 0 o 1.
+
+### Archivos, excepciones y operadores bitwise
+
+Los archivos se representan mediante descriptores enteros. `AbrirArchivo`
+acepta los modos `r`, `w`, `a`, `r+`, `w+` y `a+`; `r` abre solo para lectura,
+`w` crea/trunca para escritura y `a` agrega al final. Las funciones disponibles:
+
+```mx
+Entero archivo = AbrirArchivo("datos.txt", "r");
+Cadena linea = LeerLinea(archivo);
+Booleano fin = FinArchivo(archivo);
+CerrarArchivo(archivo);
+```
+
+`LeerTodoArchivo(handle)` lee desde la posición actual (hasta 255 bytes por el
+límite actual de cadenas); `EscribirArchivo(handle, texto)` devuelve los bytes
+escritos o `-1` en error. `AbrirArchivo` devuelve `-1` si falla, `CerrarArchivo`
+devuelve `Falso` para un descriptor no válido o si el cierre falla, y
+`EliminarArchivo(ruta)` elimina una ruta y devuelve un booleano. Los fallos de
+archivo se reportan en `stderr` y quedan disponibles en `UltimoError()`.
+
+Las excepciones explícitas usan `Intentar { ... } Capturar { ... }` y
+`Lanzar("mensaje");`. La captura puede declarar una variable local de tipo
+`Cadena` con `Capturar (error) { ... }`; esa variable solo existe dentro del
+bloque de captura. `ObtenerMensaje(error)` devuelve el mensaje asociado a esa
+captura. `UltimoError()` se conserva para código existente. Las excepciones no
+capturadas se informan y terminan el programa con error. Actualmente las
+excepciones exponen el mensaje, no un stack trace.
+
+```mx
+Intentar {
+    Entero resultado = 10 / 0;
+} Capturar (error) {
+    Mostrar("No se pudo calcular: ", ObtenerMensaje(error), "\n");
+}
+```
+
+Los operadores bitwise trabajan con `Entero` de 64 bits con signo, respetan la
+precedencia habitual (`~`, desplazamientos, `&`, `^`, `|`) y admiten `&=`, `|=`,
+`^=`, `<<=` y `>>=`. El contador de desplazamiento se reduce a los 6 bits bajos,
+de acuerdo con el comportamiento de las instrucciones x86-64 del backend.
+
+### Sockets TCP y UDP
+
+Los sockets se representan mediante descriptores enteros y admiten hasta 128
+conexiones abiertas a la vez. La API permite conectar clientes TCP, escuchar y
+aceptar conexiones, enviar y recibir texto, usar UDP, establecer timeouts de
+envio/recepcion y consultar direcciones remotas y puertos locales:
+
+```mx
+Entero udp = SocketUDP(0);
+Entero puerto = SocketPuertoLocal(udp);
+SocketTimeout(udp, 1000, 1000);
+SocketEnviarUDP(udp, "127.0.0.1", puerto, "hola");
+Cadena mensaje = SocketRecibirUDP(udp, 255);
+Cadena remitente = SocketDireccionRemota(udp);
+SocketCerrar(udp);
+```
+
+Funciones disponibles: `SocketTCPConectar(host, puerto)`,
+`SocketTCPEscuchar(puerto, backlog)`, `SocketTCPAceptar(servidor)`,
+`SocketEnviar(socket, texto)`, `SocketRecibir(socket, maxBytes)`,
+`SocketRecibirLinea(socket, maxBytes)`,
+`SocketUDP(puertoLocal)`, `SocketEnviarUDP(socket, host, puerto, texto)`,
+`SocketRecibirUDP(socket, maxBytes)`, `SocketDireccionRemota(socket)`,
+`SocketPuertoLocal(socket)`, `SocketTimeout(socket, recibirMs, enviarMs)` y
+`SocketCerrar(socket)`. Un puerto local de `0` solicita un puerto efimero del
+sistema; `SocketPuertoLocal` permite consultarlo. Los timeouts se expresan en
+milisegundos; `0` los desactiva. `SocketRecibir` devuelve lo que haya disponible
+hasta `maxBytes` (1..255), no garantiza un mensaje TCP completo; TCP es un
+flujo, mientras que UDP conserva los limites de cada datagrama. La API es de
+texto, no de datos binarios arbitrarios. Los fallos devuelven `-1`, una cadena
+vacia o `Falso`, segun la operacion, y dejan detalles en `UltimoError()`.
+`SocketRecibirLinea` espera hasta recibir un salto de linea y elimina `CR/LF`;
+es útil para delimitar mensajes de chat sobre TCP.
+
+#### Chat TCP interactivo de 16 mensajes
+
+El ejemplo de chat funciona en dos terminales y muestra cada mensaje al
+recibirlo. Compila ambos programas:
+
+```bash
+./build/bin/compilador examples/sockets_chat_servidor.mx /tmp/mx_chat_servidor -no-run
+./build/bin/compilador examples/sockets_chat_cliente.mx /tmp/mx_chat_cliente -no-run
+```
+
+En una terminal inicia `/tmp/mx_chat_servidor`; en la otra, inicia
+`/tmp/mx_chat_cliente`. El cliente envia el primer mensaje y luego los
+participantes alternan. Los mensajes pueden incluir espacios. Al completar
+16 mensajes, ambos lados cierran la conexion. El puerto predeterminado del
+ejemplo es `5050`.
+
+Ejemplo de servidor TCP de una conexion:
+
+```mx
+Entero servidor = SocketTCPEscuchar(5050, 8);
+Entero cliente = SocketTCPAceptar(servidor);
+SocketTimeout(cliente, 5000, 5000);
+Cadena solicitud = SocketRecibir(cliente, 255);
+SocketEnviar(cliente, "Recibido: ");
+SocketEnviar(cliente, solicitud);
+SocketCerrar(cliente);
+SocketCerrar(servidor);
+```
+
+#### TLS y HTTPS
+
+TLS 1.2 o posterior esta disponible para conexiones TCP existentes y
+peticiones HTTPS. El cliente valida el certificado usando las autoridades
+certificadoras configuradas para OpenSSL y comprueba el hostname; rechaza
+certificados no confiables o emitidos para otro nombre. El servidor usa un
+certificado y una clave privada en formato PEM:
+
+```mx
+Entero cliente = SocketTCPConectar("example.com", 443);
+SocketTimeout(cliente, 5000, 5000);
+Booleano seguro = SocketTLSCliente(cliente, "example.com");
+Si (seguro) {
+    SocketEnviar(cliente, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n");
+    Cadena respuesta = SocketRecibir(cliente, 255);
+    Mostrar(respuesta);
+}
+SocketCerrar(cliente);
+
+Entero servidorTLS = SocketTCPEscuchar(5443, 8);
+SocketTLSServidor(servidorTLS, "certificado.pem", "clave-privada.pem");
+Entero conexion = SocketTCPAceptar(servidorTLS);
+SocketEnviar(conexion, "conexion cifrada");
+SocketCerrar(conexion);
+SocketCerrar(servidorTLS);
+
+Entero estado = HttpTLS("https://example.com/", "GET", "", "");
+Cadena cuerpo = HttpCuerpo();
+```
+
+`SocketTLSServidor` configura el listener y `SocketTCPAceptar` completa el
+handshake antes de devolver la conexion. `SocketEnviar` y `SocketRecibir`
+usan TLS automaticamente despues del handshake. `HttpTLS` requiere una URL
+`https://`; `Http` mantiene su compatibilidad y cifra tambien las URLs HTTPS
+literales que el compilador puede identificar. Instala OpenSSL antes de
+configurar CMake para habilitar estas funciones. Sin OpenSSL, los programas
+que no solicitan TLS siguen compilando; al pedir TLS el compilador informa
+que falta la dependencia.
 
 ## 🔐 Operadores Soportados
 
@@ -326,9 +518,9 @@ Mostrar("Cuerpo: ", cuerpo, "\n");
 hasta 1 MiB. `HttpCabeceras()` devuelve las cabeceras de respuesta separadas
 por saltos de línea. La implementación usa
 HTTP/1.1 sobre TCP y resolución DNS del sistema, sin depender de `curl`.
-Actualmente `https://` devuelve `0` hasta añadir TLS nativo por plataforma:
-Schannel en Windows, Secure Transport en macOS y una biblioteca TLS explícita
-en Linux. Esto evita presentar una conexión sin cifrar como HTTPS.
+Las URL `https://` requieren que el programa se enlace con OpenSSL 1.1.1+
+como se describe en la sección de TLS. Usa `HttpTLS` cuando la URL se obtiene
+dinámicamente; una URL HTTPS literal pasada a `Http` también habilita TLS.
 La prueba mínima está en `tests/http.mx`.
 
 ## 🛠️ Mantenimiento
@@ -365,7 +557,7 @@ Este es un proyecto educativo. Se aceptan sugerencias y mejoras.
 - ✅ Fase 3: Generación de código IR
 - ✅ Fase 4: Compilación a ASM x86-64
 - ✅ Fase 5: Enlazado a ejecutables
-- ✅ Fase 6: Suite de pruebas (13 programas)
+- ✅ Fase 6: Suite de pruebas de `tests/*.mx`
 - ✅ Fase 7: Documentación completa
 - ✅ Fase 8: Optimización y limpieza
 

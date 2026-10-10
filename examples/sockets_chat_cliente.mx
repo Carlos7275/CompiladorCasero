@@ -1,0 +1,27 @@
+Entero conexion = SocketTCPConectar("127.0.0.1", 5050);
+Si (conexion < 1) {
+    Lanzar(UltimoError());
+}
+
+SocketTimeout(conexion, 60000, 60000);
+Cadena mensaje = "";
+Cadena recibido = "";
+Entero numeroMensaje = 1;
+
+Mientras (numeroMensaje <= 16) {
+    Mostrar("Tu mensaje #", numeroMensaje, " > ");
+    Leer(mensaje);
+    SocketEnviar(conexion, mensaje);
+    SocketEnviar(conexion, "\n");
+    Mostrar("Enviado #", numeroMensaje, ": ", mensaje, "\n");
+    numeroMensaje = numeroMensaje + 1;
+
+    Si (numeroMensaje <= 16) {
+        recibido = SocketRecibirLinea(conexion, 255);
+        Mostrar("Recibido #", numeroMensaje, ": ", recibido, "\n");
+        numeroMensaje = numeroMensaje + 1;
+    }
+}
+
+SocketCerrar(conexion);
+Mostrar("Chat terminado: se completaron 16 mensajes y se cerro la conexion.\n");

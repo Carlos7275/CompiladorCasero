@@ -17,6 +17,22 @@ target_include_directories(compilador PRIVATE
     "${CMAKE_SOURCE_DIR}/src/include"
 )
 
+find_package(OpenSSL 1.1.1 QUIET)
+if(OpenSSL_FOUND)
+    get_filename_component(MX_OPENSSL_LIBRARY_DIR "${OPENSSL_SSL_LIBRARY}" DIRECTORY)
+    target_compile_definitions(compilador PRIVATE
+        MX_OPENSSL_AVAILABLE=1
+        MX_OPENSSL_INCLUDE_DIR="${OPENSSL_INCLUDE_DIR}"
+        MX_OPENSSL_SSL_LIBRARY="${OPENSSL_SSL_LIBRARY}"
+        MX_OPENSSL_CRYPTO_LIBRARY="${OPENSSL_CRYPTO_LIBRARY}"
+        MX_OPENSSL_LIBRARY_DIR="${MX_OPENSSL_LIBRARY_DIR}"
+    )
+    message(STATUS "OpenSSL encontrado: TLS disponible para programas que lo soliciten")
+else()
+    target_compile_definitions(compilador PRIVATE MX_OPENSSL_AVAILABLE=0)
+    message(STATUS "OpenSSL 1.1.1+ no encontrado: TLS sera opcional y no disponible")
+endif()
+
 if(MSVC)
     target_compile_options(compilador PRIVATE /W4 /O2)
 else()

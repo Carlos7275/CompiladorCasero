@@ -18,6 +18,14 @@ Quadruple *ir_code;
 
 int next_temp_number = 0;
 int next_label_number = 0;
+static int interactive_debugger_enabled = 0;
+static char *exception_handler_labels[64];
+static int exception_handler_depth = 0;
+
+void set_interactive_debugger(int enabled)
+{
+    interactive_debugger_enabled = enabled;
+}
 
 static TablaSimbolos *global_symbol_table_ref;
 static TablaSimbolos *ambito_actual = NULL;
@@ -31,6 +39,25 @@ static ASTNode *current_inline_function = NULL;
 static unsigned long long current_inline_instance = 0;
 static unsigned long long next_inline_instance = 0;
 static ASTNode *current_recursive_function_codegen = NULL;
+
+static EntradaSimbolo *buscar_simbolo_en_subarbol(TablaSimbolos *scope,
+                                                  const char *name)
+{
+    if (!scope || !name)
+        return NULL;
+
+    EntradaSimbolo *entry = buscar_simbolo_en_ambito_actual(scope, name);
+    if (entry)
+        return entry;
+
+    for (int i = 0; i < scope->num_hijos; ++i)
+    {
+        entry = buscar_simbolo_en_subarbol(scope->hijos[i], name);
+        if (entry)
+            return entry;
+    }
+    return NULL;
+}
 
 #define MAX_RECURSIVE_LAYOUTS 128
 #define MAX_RECURSIVE_SLOTS 512
@@ -339,30 +366,26 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         const char *native = expr_node->hijo_izq->valor.nombre_id;
         if (strcmp(native, "Entorno") == 0)
         {
-            result_name = resolver_entorno(expr_node->hijo_der
-                                               ? generate_code_for_expression(expr_node->hijo_der)
-                                               : "\"\"");
+            char *clave = expr_node->hijo_der
+                              ? generate_code_for_expression(expr_node->hijo_der)
+                              : NULL;
+            result_name = resolver_entorno(clave ? clave : "\"\"");
+            free(clave);
             break;
         }
         if (strcmp(native, "ExisteEntorno") == 0)
         {
             char *clave = NULL;
-            int clave_owned = 0;
-
             if (expr_node->hijo_der)
                 clave = generate_code_for_expression(expr_node->hijo_der);
             else
-            {
                 clave = strdup("\"\"");
-                clave_owned = 1;
-            }
 
             char *valor = resolver_entorno(clave);
             result_name = new_temp();
             emit_quad(IR_ASSIGN, valor && strcmp(valor, "\"\"") != 0 ? "1" : "0", NULL, result_name);
 
-            if (clave_owned)
-                free(clave);
+            free(clave);
             free(valor);
             break;
         }
@@ -383,6 +406,7 @@ static char *generate_code_for_expression(ASTNode *expr_node)
                 if (n > 0)
                     strcat(args, "|");
                 strcat(args, values[n]);
+                free(values[n]);
             }
             result_name = (expr_node->resolved_type == FLOAT) ? new_float_temp() : (expr_node->resolved_type == STRING ? new_string_temp() : new_temp());
             emit_quad(IR_NATIVE_CALL, native, args, result_name);
@@ -492,6 +516,7 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         current_return_type = fn->return_type;
         current_return_storage = nombre_local_funcion_actual("return", fn->return_type);
         current_function_end_label = new_label();
+        char *function_end_label = current_function_end_label;
 
         generate_code_for_node(fn->hijo_der);
         emit_quad(IR_LABEL, NULL, NULL, current_function_end_label);
@@ -509,6 +534,7 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         current_inline_function = previous_inline_function;
         current_inline_instance = previous_inline_instance;
 
+        free(function_end_label);
         if (function_return_value)
         {
             if (fn->return_type == STRING)
@@ -627,12 +653,26 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         result_name = temp;
         break;
     }
+    case AST_BIT_NOT_EXPR:
+    {
+        char *operand_name = generate_code_for_expression(expr_node->hijo_izq);
+        char *temp = new_temp();
+        emit_quad(IR_BIT_NOT, operand_name, NULL, temp);
+        free(operand_name);
+        result_name = temp;
+        break;
+    }
 
     case AST_SUMA_EXPR:
     case AST_RESTA_EXPR:
     case AST_MULT_EXPR:
     case AST_DIV_EXPR:
     case AST_MOD_EXPR:
+    case AST_BIT_AND_EXPR:
+    case AST_BIT_OR_EXPR:
+    case AST_BIT_XOR_EXPR:
+    case AST_SHIFT_LEFT_EXPR:
+    case AST_SHIFT_RIGHT_EXPR:
     case AST_OR_EXPR:
     case AST_AND_EXPR:
     case AST_IGUAL_EXPR:
@@ -690,6 +730,11 @@ static char *generate_code_for_expression(ASTNode *expr_node)
         case AST_AND_EXPR:
             op_code = IR_AND;
             break;
+        case AST_BIT_AND_EXPR: op_code = IR_BIT_AND; break;
+        case AST_BIT_OR_EXPR: op_code = IR_BIT_OR; break;
+        case AST_BIT_XOR_EXPR: op_code = IR_BIT_XOR; break;
+        case AST_SHIFT_LEFT_EXPR: op_code = IR_SHIFT_LEFT; break;
+        case AST_SHIFT_RIGHT_EXPR: op_code = IR_SHIFT_RIGHT; break;
         case AST_IGUAL_EXPR:
             op_code = IR_EQ;
             break;
@@ -712,6 +757,13 @@ static char *generate_code_for_expression(ASTNode *expr_node)
             fprintf(stderr, "Error at %d:%d: Error interno: Operador binario desconocido en expresión.\n", expr_node->renglon, expr_node->columna);
             op_code = (IROperation)-1;
             break;
+        }
+        if (op_code == IR_DIV || op_code == IR_MOD)
+        {
+            const char *handler = exception_handler_depth > 0
+                                      ? exception_handler_labels[exception_handler_depth - 1]
+                                      : NULL;
+            emit_quad(IR_DIV_ZERO_CHECK, right_operand, handler, NULL);
         }
         emit_quad(op_code, left_operand, right_operand, temp);
         free(left_operand);
@@ -774,6 +826,7 @@ static void generate_code_for_statement(ASTNode *stmt_node)
         {
             char *print_arg = generate_code_for_expression(current);
             emit_quad(IR_PRINT, print_arg, NULL, NULL);
+            free(print_arg);
             current = current->siguiente_hermano;
         }
         break;
@@ -805,9 +858,22 @@ static int es_funcion_nativa(const char *nombre)
         "Abs", "Absoluto", "Min", "Max", "Potencia", "RaizCuadrada",
         "Seno", "Coseno", "Tangente", "Logaritmo", "Exponencial",
         "Piso", "Techo", "Redondear", "Longitud", "Comparar", "Contiene", "Aleatorio", "AleatorioEntre", "Entorno", "ExisteEntorno",
-        "Http", "HttpCuerpo", "HttpCabeceras", "Decimales"};
+        "Http", "HttpTLS", "HttpCuerpo", "HttpCabeceras", "Decimales",
+        "SocketTCPConectar", "SocketTCPEscuchar", "SocketTCPAceptar",
+        "SocketTLSCliente", "SocketTLSServidor",
+        "SocketEnviar", "SocketRecibir", "SocketRecibirLinea",
+        "SocketUDP", "SocketEnviarUDP",
+        "SocketRecibirUDP", "SocketDireccionRemota", "SocketPuertoLocal",
+        "SocketTimeout", "SocketCerrar", "ObtenerMensaje"};
+    static const char *archivos[] = {
+        "AbrirArchivo", "LeerLinea", "LeerTodoArchivo",
+        "EscribirArchivo", "FinArchivo", "CerrarArchivo", "UltimoError",
+        "EliminarArchivo"};
     for (size_t i = 0; i < sizeof(nombres) / sizeof(nombres[0]); i++)
         if (strcmp(nombre, nombres[i]) == 0)
+            return 1;
+    for (size_t i = 0; i < sizeof(archivos) / sizeof(archivos[0]); ++i)
+        if (strcmp(nombre, archivos[i]) == 0)
             return 1;
     return 0;
 }
@@ -860,6 +926,7 @@ static void generate_code_for_declaration(ASTNode *decl_node)
             target_name = strdup(var_name);
         emit_quad(IR_ASSIGN, expr_result, NULL, target_name);
         free(target_name);
+        free(expr_result);
     }
 }
 
@@ -952,6 +1019,8 @@ static void generate_code_for_while_statement(ASTNode *while_node)
     emit_quad(IR_LABEL, NULL, NULL, loop_end_label);
 
     free(condition_result);
+    free(loop_start_label);
+    free(loop_end_label);
     pop_loop_labels();
 }
 
@@ -1016,6 +1085,9 @@ static void generate_code_for_for_statement(ASTNode *for_node)
     emit_quad(IR_LABEL, NULL, NULL, loop_end_label);
 
     free(condition_result);
+    free(loop_condition_label);
+    free(loop_increment_label);
+    free(loop_end_label);
     pop_loop_labels();
 }
 
@@ -1054,6 +1126,12 @@ void imprimir_codigo_intermedio(void)
         case IR_MOD:
             printf("MOD");
             break;
+        case IR_BIT_AND: printf("BIT_AND"); break;
+        case IR_BIT_OR: printf("BIT_OR"); break;
+        case IR_BIT_XOR: printf("BIT_XOR"); break;
+        case IR_SHIFT_LEFT: printf("SHL"); break;
+        case IR_SHIFT_RIGHT: printf("SHR"); break;
+        case IR_BIT_NOT: printf("BIT_NOT"); break;
         case IR_NEG:
             printf("NEG");
             break;
@@ -1084,6 +1162,9 @@ void imprimir_codigo_intermedio(void)
         case IR_NOT:
             printf("NOT");
             break;
+        case IR_DEBUG_STEP: printf("DEBUG_STEP"); break;
+        case IR_THROW: printf("THROW"); break;
+        case IR_DIV_ZERO_CHECK: printf("DIV_ZERO_CHECK"); break;
         case IR_ASSIGN:
             printf("ASSIGN");
             break;
@@ -1236,69 +1317,24 @@ static void cargar_float_en_xmm(FILE *f, const char *operando, const char *regis
                 "    movq %s, rax\n",
                 bits, registro);
     }
-    else if (isdigit(operando[0]) ||
-             (operando[0] == '-' && isdigit(operando[1])))
+    else if (is_number(operando))
     {
         fprintf(f,
-                "    mov eax, %s\n"
-                "    cvtsi2sd %s, eax\n",
+                "    mov rax, %s\n"
+                "    cvtsi2sd %s, rax\n",
                 operando, registro);
     }
-    else
+    else if (es_operando_flotante_codegen(operando))
     {
         fprintf(f,
                 "    movsd %s, qword %s\n",
                 registro, mem_ref(operando));
     }
-}
-
-static int lista_contiene_operando(const char *lista, const char *operando)
-{
-    if (!lista || !operando)
-        return 0;
-
-    char copia[4096];
-    snprintf(copia, sizeof(copia), "%s", lista);
-
-    char *token = strtok(copia, "|");
-    while (token)
+    else
     {
-        if (strcmp(token, operando) == 0)
-            return 1;
-        token = strtok(NULL, "|");
+        emitir_carga_entero(f, "rax", operando);
+        fprintf(f, "    cvtsi2sd %s, rax\n", registro);
     }
-
-    return 0;
-}
-
-static char *sustituir_operando_en_lista(const char *lista, const char *buscado, const char *reemplazo)
-{
-    if (!lista || !buscado || !reemplazo)
-        return lista ? strdup(lista) : NULL;
-
-    char copia[4096];
-    snprintf(copia, sizeof(copia), "%s", lista);
-
-    char *resultado = calloc(sizeof(copia), 1);
-    if (!resultado)
-        return NULL;
-
-    char *token = strtok(copia, "|");
-    int primero = 1;
-
-    while (token)
-    {
-        const char *valor = strcmp(token, buscado) == 0 ? reemplazo : token;
-
-        if (!primero)
-            strcat(resultado, "|");
-        strcat(resultado, valor);
-        primero = 0;
-
-        token = strtok(NULL, "|");
-    }
-
-    return resultado;
 }
 
 int es_literal(const char *s)
@@ -1310,64 +1346,9 @@ int es_literal(const char *s)
     strtod(s, &endptr);
     return *endptr == '\0';
 }
-static int es_temporal(const char *s)
-{
-    return es_temporal_prefijado(s, 't');
-}
-
-static void sustituir_uso_temporal(char *dst, const char *src)
-{
-    for (int i = 0; i < ir_current_size; i++)
-    {
-        Quadruple *q = &ir_code[i];
-
-        if (q->arg1 && strcmp(q->arg1, dst) == 0)
-        {
-            free(q->arg1);
-            q->arg1 = strdup(src);
-        }
-
-        if (q->arg2 && strcmp(q->arg2, dst) == 0)
-        {
-            free(q->arg2);
-            q->arg2 = strdup(src);
-        }
-
-        /* Los argumentos de una llamada están serializados como a|b|c. */
-        if ((q->op == IR_CALL || q->op == IR_NATIVE_CALL) &&
-            q->arg2 && lista_contiene_operando(q->arg2, dst))
-        {
-            char *nuevo = sustituir_operando_en_lista(q->arg2, dst, src);
-            if (nuevo)
-            {
-                free(q->arg2);
-                q->arg2 = nuevo;
-            }
-        }
-    }
-}
-
 static int ir_op_is_terminator(IROperation op)
 {
     return op == IR_GOTO || op == IR_HALT || op == IR_FUNCTION_END;
-}
-
-static int ir_result_used_after(const char *name, int from)
-{
-    if (!name) return 0;
-    for (int j = from; j < ir_current_size; ++j)
-    {
-        Quadruple *q = &ir_code[j];
-        if ((q->arg1 && strcmp(q->arg1, name) == 0) ||
-            (q->arg2 && strcmp(q->arg2, name) == 0) ||
-            ((q->op == IR_STORE_ARRAY) && q->result && strcmp(q->result, name) == 0) ||
-            (q->op == IR_CALL && lista_contiene_operando(q->arg2, name)) ||
-            (q->op == IR_NATIVE_CALL && lista_contiene_operando(q->arg2, name)))
-            return 1;
-        if (q->result && strcmp(q->result, name) == 0 && q->op != IR_STORE_ARRAY)
-            return 0;
-    }
-    return 0;
 }
 
 static int ir_label_target_equal(const char *target, const char *label)
@@ -1416,6 +1397,13 @@ static int ir_try_constant_fold(Quadruple *q)
     double da, db;
     char buffer[64];
 
+    if (q->op == IR_BIT_NOT && ir_parse_integer(q->arg1, &a))
+    {
+        snprintf(buffer, sizeof(buffer), "%lld", ~a);
+        ir_replace_with_assign(q, buffer);
+        return 1;
+    }
+
     if (q->arg2 && ir_parse_integer(q->arg1, &a) && ir_parse_integer(q->arg2, &b))
     {
         long long r = 0;
@@ -1435,6 +1423,11 @@ static int ir_try_constant_fold(Quadruple *q)
         case IR_NE: r = a != b; break;
         case IR_AND: r = (a != 0) && (b != 0); break;
         case IR_OR:  r = (a != 0) || (b != 0); break;
+        case IR_BIT_AND: r = a & b; break;
+        case IR_BIT_OR: r = a | b; break;
+        case IR_BIT_XOR: r = a ^ b; break;
+        case IR_SHIFT_LEFT: r = (long long)((unsigned long long)a << ((unsigned long long)b & 63)); break;
+        case IR_SHIFT_RIGHT: r = a >> ((unsigned long long)b & 63); break;
         default: valid = 0; break;
         }
         if (!valid) return 0;
@@ -1495,6 +1488,21 @@ static int ir_try_algebraic_simplification(Quadruple *q)
     case IR_OR:
         if (v == 0) { ir_replace_with_assign(q, q->arg1); return 1; }
         break;
+    case IR_BIT_AND:
+        if (v == 0) { ir_replace_with_assign(q, "0"); return 1; }
+        if (v == -1) { ir_replace_with_assign(q, q->arg1); return 1; }
+        break;
+    case IR_BIT_OR:
+        if (v == 0) { ir_replace_with_assign(q, q->arg1); return 1; }
+        if (v == -1) { ir_replace_with_assign(q, "-1"); return 1; }
+        break;
+    case IR_BIT_XOR:
+        if (v == 0) { ir_replace_with_assign(q, q->arg1); return 1; }
+        break;
+    case IR_SHIFT_LEFT:
+    case IR_SHIFT_RIGHT:
+        if (v == 0) { ir_replace_with_assign(q, q->arg1); return 1; }
+        break;
     default:
         break;
     }
@@ -1553,23 +1561,6 @@ static void eliminar_codigo_inalcanzable(void)
     compactar_ir();
 }
 
-static int ir_temporal_en_bloque_lineal(int indice, const char *nombre)
-{
-    if (!nombre) return 0;
-    for (int j=indice+1; j<ir_current_size; ++j)
-    {
-        Quadruple *q=&ir_code[j];
-        if (q->op==IR_LABEL || q->op==IR_GOTO || q->op==IR_IF_FALSE_GOTO ||
-            q->op==IR_FUNCTION_BEGIN || q->op==IR_FUNCTION_END) return 0;
-        if ((q->arg1 && strcmp(q->arg1,nombre)==0) || (q->arg2 && strcmp(q->arg2,nombre)==0) ||
-            ((q->op==IR_STORE_ARRAY) && q->result && strcmp(q->result,nombre)==0) ||
-            (q->op==IR_CALL && lista_contiene_operando(q->arg2,nombre)) ||
-            (q->op==IR_NATIVE_CALL && lista_contiene_operando(q->arg2,nombre))) return 1;
-        if (q->result && strcmp(q->result,nombre)==0 && q->op != IR_STORE_ARRAY) return 1;
-    }
-    return 0;
-}
-
 static void eliminar_gotos_redundantes(void)
 {
     for (int i = 0; i + 1 < ir_current_size; ++i)
@@ -1602,8 +1593,11 @@ static void eliminar_labels_no_referenciados(void)
         {
             if (i == j) continue;
             Quadruple *r = &ir_code[j];
-            if ((r->op == IR_GOTO || r->op == IR_IF_FALSE_GOTO) &&
-                r->result && strcmp(r->result, q->result) == 0)
+            if (((r->op == IR_GOTO || r->op == IR_IF_FALSE_GOTO ||
+                  r->op == IR_THROW) &&
+                 r->result && strcmp(r->result, q->result) == 0) ||
+                (r->op == IR_DIV_ZERO_CHECK && r->arg2 &&
+                 strcmp(r->arg2, q->result) == 0))
                 referenced = 1;
         }
 
@@ -2037,9 +2031,14 @@ void generate_asm(FILE *f)
     int uses_round = 0;
     int uses_rand = 0;
     int uses_http_request = 0;
+    int uses_tls = 0;
     int uses_http_body = 0;
     int uses_http_headers = 0;
+    int uses_sockets = 0;
     int uses_decimales = 0;
+    int uses_file_io = 0;
+    int uses_debugger = 0;
+    int uses_exceptions = 0;
     preparar_simbolos_flotantes();
     preparar_layouts_recursivos();
     const char *data_section = "section .data\n";
@@ -2048,12 +2047,25 @@ void generate_asm(FILE *f)
     const char *printf_sym = "printf";
     const char *scanf_sym = "scanf";
     const char *main_sym = "main";
+    const char *runtime_prefix =
+#if defined(__APPLE__)
+        "_";
+#else
+        "";
+#endif
 
     fprintf(f, "BITS 64\n");
 
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
+        if (q->op == IR_DEBUG_STEP)
+            uses_debugger = 1;
+        if (q->op == IR_THROW || q->op == IR_DIV_ZERO_CHECK ||
+            (q->op == IR_NATIVE_CALL && q->arg1 &&
+             (strcmp(q->arg1, "UltimoError") == 0 ||
+              strcmp(q->arg1, "ObtenerMensaje") == 0)))
+            uses_exceptions = 1;
         if (q->op == IR_PRINT)
         {
             uses_print = 1;
@@ -2081,7 +2093,15 @@ void generate_asm(FILE *f)
         else if (q->op == IR_NATIVE_CALL)
         {
             const char *native = asm_symbol(q->arg1);
-            if (strcmp(native, "Longitud") == 0)
+            if (strcmp(native, "AbrirArchivo") == 0 ||
+                strcmp(native, "LeerLinea") == 0 ||
+                strcmp(native, "LeerTodoArchivo") == 0 ||
+                strcmp(native, "EscribirArchivo") == 0 ||
+                strcmp(native, "FinArchivo") == 0 ||
+                strcmp(native, "CerrarArchivo") == 0 ||
+                strcmp(native, "EliminarArchivo") == 0)
+                uses_file_io = 1;
+            else if (strcmp(native, "Longitud") == 0)
                 uses_strlen = 1;
             else if (strcmp(native, "Comparar") == 0)
                 uses_strcmp = 1;
@@ -2110,12 +2130,28 @@ void generate_asm(FILE *f)
             else if (strcmp(native, "Aleatorio") == 0 ||
                      strcmp(native, "AleatorioEntre") == 0)
                 uses_rand = 1;
-            else if (strcmp(native, "Http") == 0)
+            else if (strcmp(native, "Http") == 0 ||
+                     strcmp(native, "HttpTLS") == 0)
+            {
                 uses_http_request = 1;
+                if (strcmp(native, "HttpTLS") == 0)
+                    uses_tls = 1;
+                else
+                {
+                    char serialized[512];
+                    snprintf(serialized, sizeof(serialized), "%s",
+                             q->arg2 ? q->arg2 : "");
+                    char *url = strtok(serialized, "|");
+                    if (url && strncmp(url, "\"https://", 9) == 0)
+                        uses_tls = 1;
+                }
+            }
             else if (strcmp(native, "HttpCuerpo") == 0)
                 uses_http_body = 1;
             else if (strcmp(native, "HttpCabeceras") == 0)
                 uses_http_headers = 1;
+            else if (strncmp(native, "Socket", 6) == 0)
+                uses_sockets = 1;
             else if (strcmp(native, "Decimales") == 0)
             {
                 uses_decimales = 1;
@@ -2136,6 +2172,8 @@ void generate_asm(FILE *f)
 
     // Sección .data con formatos
     fprintf(f, "%s", data_section);
+    if (uses_exceptions)
+        fprintf(f, "__mx_div_zero_message db \"Excepcion: division entre cero\", 0\n");
     if (uses_int_print)
         fprintf(f, "fmt_int db \"%%lld\", 10, 0\n");
     if (uses_float_print)
@@ -2151,7 +2189,7 @@ void generate_asm(FILE *f)
     if (uses_float_read)
         fprintf(f, "fmt_read_float db \"%%lf\", 0\n");
     if (uses_string_read)
-        fprintf(f, "fmt_read_str db \"%%255s\", 0\n");
+        fprintf(f, "fmt_read_str db \" %%255[^\", 10, \"]\", 0\n");
 
     // Literales string (buscar en todas las operaciones)
     for (int i = 0; i < ir_current_size; i++)
@@ -2164,7 +2202,7 @@ void generate_asm(FILE *f)
             print_asm_string_literal(f, strip_quotes(asm_symbol(q->arg1)));
             fprintf(f, ", 0\n");
         }
-        if (is_string_literal(asm_symbol(q->arg2)))
+        if (q->op != IR_NATIVE_CALL && is_string_literal(asm_symbol(q->arg2)))
         {
             fprintf(f, "str_%d_2 db ", i);
             print_asm_string_literal(f, strip_quotes(asm_symbol(q->arg2)));
@@ -2194,8 +2232,8 @@ void generate_asm(FILE *f)
     fprintf(f, "%s", bss_section);
     if (uses_decimales)
     {
-        fprintf(f, "    __decimales_factor resq 1\n");
-        fprintf(f, "    __decimales_precision resq 1\n");
+        fprintf(f, "    __decimales_factor resb 8\n");
+        fprintf(f, "    __decimales_precision resb 8\n");
     }
     for (int i = 0; i < ir_current_size; i++)
     {
@@ -2219,11 +2257,11 @@ void generate_asm(FILE *f)
                         exit(EXIT_FAILURE);
                     }
                     snprintf(declared_vars[declared_vars_count++], sizeof(declared_vars[0]), "%s", var);
-                    EntradaSimbolo *entry = buscar_simbolo(ambito_actual, var);
+                    EntradaSimbolo *entry = buscar_simbolo_en_subarbol(global_symbol_table_ref, var);
                     if (entry != NULL && entry->tipo == STRING)
                         fprintf(f, "    %s resb 256\n", var);
                     else
-                        fprintf(f, "    %s resq 1\n", var);
+                        fprintf(f, "    %s resb 8\n", var);
                 }
             }
         }
@@ -2244,11 +2282,11 @@ void generate_asm(FILE *f)
                         exit(EXIT_FAILURE);
                     }
                     snprintf(declared_vars[declared_vars_count++], sizeof(declared_vars[0]), "%s", asm_arg);
-                    EntradaSimbolo *entry = buscar_simbolo(ambito_actual, arg);
+                    EntradaSimbolo *entry = buscar_simbolo_en_subarbol(global_symbol_table_ref, arg);
                     if (entry && entry->tipo == STRING)
                         fprintf(f, "    %s resb 256\n", asm_arg);
                     else
-                        fprintf(f, "    %s resq 1\n", asm_arg);
+                        fprintf(f, "    %s resb 8\n", asm_arg);
                 }
                 arg = strtok(NULL, "|");
             }
@@ -2299,10 +2337,53 @@ void generate_asm(FILE *f)
             fprintf(f, "extern %srand\n", native_prefix);
         if (uses_http_request)
             fprintf(f, "extern %smx_http_request\n", native_prefix);
+        if (uses_tls && uses_http_request)
+            fprintf(f, "extern %smx_https_request\n", native_prefix);
         if (uses_http_body)
             fprintf(f, "extern %smx_http_body\n", native_prefix);
         if (uses_http_headers)
             fprintf(f, "extern %smx_http_headers\n", native_prefix);
+        if (uses_sockets)
+            fprintf(f,
+                    "extern %smx_socket_tcp_connect\n"
+                    "extern %smx_socket_tcp_listen\n"
+                    "extern %smx_socket_tcp_accept\n"
+                    "extern %smx_socket_send\n"
+                    "extern %smx_socket_receive\n"
+                    "extern %smx_socket_receive_line\n"
+                    "extern %smx_socket_udp_bind\n"
+                    "extern %smx_socket_udp_send\n"
+                    "extern %smx_socket_udp_receive\n"
+                    "extern %smx_socket_remote_address\n"
+                    "extern %smx_socket_local_port\n"
+                    "extern %smx_socket_set_timeout\n"
+                    "extern %smx_socket_tls_client\n"
+                    "extern %smx_socket_tls_server\n"
+                    "extern %smx_socket_close\n",
+                    native_prefix, native_prefix, native_prefix, native_prefix,
+                    native_prefix, native_prefix, native_prefix, native_prefix,
+                    native_prefix, native_prefix, native_prefix, native_prefix,
+                    native_prefix, native_prefix, native_prefix);
+        if (uses_file_io)
+            fprintf(f,
+                    "extern %smx_file_open\n"
+                    "extern %smx_file_read_line\n"
+                    "extern %smx_file_read_all\n"
+                    "extern %smx_file_write\n"
+                    "extern %smx_file_eof\n"
+                    "extern %smx_file_close\n"
+                    "extern %smx_file_remove\n",
+                    native_prefix, native_prefix, native_prefix,
+                    native_prefix, native_prefix, native_prefix, native_prefix);
+        if (uses_debugger)
+            fprintf(f, "extern %smx_debugger_step\n", runtime_prefix);
+        if (uses_exceptions)
+            fprintf(f,
+                    "extern %smx_set_exception\n"
+                    "extern %smx_uncaught_exception\n"
+                    "extern %smx_last_exception\n"
+                    "extern %smx_exception_message\n",
+                    runtime_prefix, runtime_prefix, runtime_prefix, runtime_prefix);
     }
 
     fprintf(f, "%s:\n", main_sym);
@@ -2353,7 +2434,18 @@ void generate_asm(FILE *f)
         }
 
         case IR_ASSIGN:
-            if (es_operando_flotante_codegen(q->arg1))
+            if ((buscar_simbolo_ambitos(ambito_actual, q->result) != NULL &&
+                 buscar_simbolo_ambitos(ambito_actual, q->result)->tipo == BOOL) ||
+                strstr(q->result ? q->result : "", "_b_") != NULL)
+            {
+                if (is_number(asm_symbol(q->arg1)))
+                    fprintf(f, "    mov rax, %s\n", asm_symbol(q->arg1));
+                else
+                    fprintf(f, "    mov rax, [rel %s]\n", asm_symbol(q->arg1));
+                fprintf(f, "    test rax, rax\n    setne al\n    movzx rax, al\n    mov [rel %s], rax\n",
+                        asm_symbol(q->result));
+            }
+            else if (es_operando_flotante_codegen(q->arg1))
             {
                 cargar_float_en_xmm(f, asm_symbol(q->arg1), "xmm0");
                 fprintf(f, "    movsd [rel %s], xmm0\n", asm_symbol(q->result));
@@ -2365,7 +2457,7 @@ void generate_asm(FILE *f)
             else if (is_string_literal(asm_symbol(q->arg1)))
             {
                 // Copiar cadena byte a byte
-                EntradaSimbolo *entry_result = buscar_simbolo(ambito_actual, q->result);
+                EntradaSimbolo *entry_result = buscar_simbolo_en_subarbol(global_symbol_table_ref, q->result);
                 if (entry_result != NULL && entry_result->tipo == STRING)
                 {
                     // Generar código para copiar la cadena
@@ -2387,8 +2479,8 @@ void generate_asm(FILE *f)
                 }
             }
             else if (es_temporal_prefijado(asm_symbol(q->arg1), 's') &&
-                     buscar_simbolo(ambito_actual, q->result) != NULL &&
-                     buscar_simbolo(ambito_actual, q->result)->tipo == STRING)
+                     buscar_simbolo_en_subarbol(global_symbol_table_ref, q->result) != NULL &&
+                     buscar_simbolo_en_subarbol(global_symbol_table_ref, q->result)->tipo == STRING)
             {
                 fprintf(f,
                         "    mov rsi, [rel %s]\n"
@@ -2615,6 +2707,56 @@ void generate_asm(FILE *f)
                 fprintf(f, "    mov rcx, [rel %s]\n", asm_symbol(q->arg2));
             fprintf(f, "    test rcx, rcx\n    setne cl\n    movzx rcx, cl\n    or rax, rcx\n");
             fprintf(f, "    mov [rel %s], rax\n", asm_symbol(q->result));
+            break;
+
+        case IR_BIT_AND:
+        case IR_BIT_OR:
+        case IR_BIT_XOR:
+        case IR_SHIFT_LEFT:
+        case IR_SHIFT_RIGHT:
+            if (is_number(asm_symbol(q->arg1)))
+                fprintf(f, "    mov rax, %s\n", asm_symbol(q->arg1));
+            else
+                fprintf(f, "    mov rax, [rel %s]\n", asm_symbol(q->arg1));
+            if (q->op == IR_SHIFT_LEFT || q->op == IR_SHIFT_RIGHT)
+            {
+                if (is_number(asm_symbol(q->arg2)))
+                {
+                    long long shift = 0;
+                    ir_parse_integer(asm_symbol(q->arg2), &shift);
+                    fprintf(f, "    %s rax, %llu\n",
+                            q->op == IR_SHIFT_LEFT ? "shl" : "sar",
+                            (unsigned long long)shift & 63ULL);
+                }
+                else
+                    fprintf(f, "    mov rcx, [rel %s]\n    %s rax, cl\n",
+                            asm_symbol(q->arg2), q->op == IR_SHIFT_LEFT ? "shl" : "sar");
+            }
+            else if (is_number(asm_symbol(q->arg2)))
+            {
+                long long immediate = 0;
+                ir_parse_integer(asm_symbol(q->arg2), &immediate);
+                const char *op = q->op == IR_BIT_AND ? "and" : q->op == IR_BIT_OR ? "or" : "xor";
+                if (immediate >= INT32_MIN && immediate <= INT32_MAX)
+                    fprintf(f, "    %s rax, %s\n", op, asm_symbol(q->arg2));
+                else
+                {
+                    fprintf(f, "    mov rcx, %s\n    %s rax, rcx\n",
+                            asm_symbol(q->arg2), op);
+                }
+            }
+            else
+                fprintf(f, "    %s rax, [rel %s]\n",
+                        q->op == IR_BIT_AND ? "and" : q->op == IR_BIT_OR ? "or" : "xor",
+                        asm_symbol(q->arg2));
+            fprintf(f, "    mov [rel %s], rax\n", asm_symbol(q->result));
+            break;
+        case IR_BIT_NOT:
+            if (is_number(asm_symbol(q->arg1)))
+                fprintf(f, "    mov rax, %s\n", asm_symbol(q->arg1));
+            else
+                fprintf(f, "    mov rax, [rel %s]\n", asm_symbol(q->arg1));
+            fprintf(f, "    not rax\n    mov [rel %s], rax\n", asm_symbol(q->result));
             break;
 
         case IR_NOT:
@@ -2851,7 +2993,101 @@ void generate_asm(FILE *f)
             int is_string = strcmp(asm_symbol(q->arg1), "Longitud") == 0 ||
                             strcmp(asm_symbol(q->arg1), "Comparar") == 0 ||
                             strcmp(asm_symbol(q->arg1), "Contiene") == 0;
-            if (strcmp(asm_symbol(q->arg1), "Http") == 0)
+            const char *native_name = asm_symbol(q->arg1);
+            if (strcmp(native_name, "UltimoError") == 0)
+                fprintf(f, "    call %smx_last_exception\n    mov [rel %s], rax\n",
+                        native_prefix, asm_symbol(q->result));
+            else if (strcmp(native_name, "ObtenerMensaje") == 0)
+            {
+#if defined(_WIN32)
+                const char *message_reg = "rcx";
+#else
+                const char *message_reg = "rdi";
+#endif
+                if (is_string_literal(first))
+                    fprintf(f, "    lea %s, [rel str_native_%d_0]\n",
+                            message_reg, i);
+                else if (es_temporal_prefijado(asm_symbol(first), 's'))
+                    fprintf(f, "    mov %s, [rel %s]\n",
+                            message_reg, asm_symbol(first));
+                else
+                    fprintf(f, "    lea %s, [rel %s]\n",
+                            message_reg, asm_symbol(first));
+                fprintf(f, "    call %smx_exception_message\n    mov [rel %s], rax\n",
+                        native_prefix, asm_symbol(q->result));
+            }
+            else if (strcmp(native_name, "AbrirArchivo") == 0)
+            {
+#if defined(_WIN32)
+                const char *path_reg = "rcx", *mode_reg = "rdx";
+#else
+                const char *path_reg = "rdi", *mode_reg = "rsi";
+#endif
+                if (is_string_literal(first))
+                    fprintf(f, "    lea %s, [rel str_native_%d_0]\n", path_reg, i);
+                else
+                    fprintf(f, "    lea %s, [rel %s]\n", path_reg, asm_symbol(first));
+                if (is_string_literal(second))
+                    fprintf(f, "    lea %s, [rel str_native_%d_1]\n", mode_reg, i);
+                else
+                    fprintf(f, "    lea %s, [rel %s]\n", mode_reg, asm_symbol(second));
+                fprintf(f, "    call %smx_file_open\n    mov [rel %s], rax\n",
+                        native_prefix, asm_symbol(q->result));
+            }
+            else if (strcmp(native_name, "LeerLinea") == 0 ||
+                     strcmp(native_name, "LeerTodoArchivo") == 0 ||
+                     strcmp(native_name, "FinArchivo") == 0 ||
+                     strcmp(native_name, "CerrarArchivo") == 0)
+            {
+#if defined(_WIN32)
+                const char *handle_reg = "rcx";
+#else
+                const char *handle_reg = "rdi";
+#endif
+                if (is_number(first))
+                    fprintf(f, "    mov %s, %s\n", handle_reg, first);
+                else
+                    fprintf(f, "    mov %s, [rel %s]\n", handle_reg, asm_symbol(first));
+                const char *function = strcmp(native_name, "LeerLinea") == 0 ? "mx_file_read_line" :
+                                       strcmp(native_name, "LeerTodoArchivo") == 0 ? "mx_file_read_all" :
+                                       strcmp(native_name, "FinArchivo") == 0 ? "mx_file_eof" : "mx_file_close";
+                fprintf(f, "    call %s%s\n    mov [rel %s], rax\n",
+                        native_prefix, function, asm_symbol(q->result));
+            }
+            else if (strcmp(native_name, "EscribirArchivo") == 0)
+            {
+#if defined(_WIN32)
+                const char *handle_reg = "rcx", *text_reg = "rdx";
+#else
+                const char *handle_reg = "rdi", *text_reg = "rsi";
+#endif
+                if (is_number(first))
+                    fprintf(f, "    mov %s, %s\n", handle_reg, first);
+                else
+                    fprintf(f, "    mov %s, [rel %s]\n", handle_reg, asm_symbol(first));
+                if (is_string_literal(second))
+                    fprintf(f, "    lea %s, [rel str_native_%d_1]\n", text_reg, i);
+                else
+                    fprintf(f, "    lea %s, [rel %s]\n", text_reg, asm_symbol(second));
+                fprintf(f, "    call %smx_file_write\n    mov [rel %s], rax\n",
+                        native_prefix, asm_symbol(q->result));
+            }
+            else if (strcmp(native_name, "EliminarArchivo") == 0)
+            {
+#if defined(_WIN32)
+                const char *path_reg = "rcx";
+#else
+                const char *path_reg = "rdi";
+#endif
+                if (is_string_literal(first))
+                    fprintf(f, "    lea %s, [rel str_native_%d_0]\n", path_reg, i);
+                else
+                    fprintf(f, "    lea %s, [rel %s]\n", path_reg, asm_symbol(first));
+                fprintf(f, "    call %smx_file_remove\n    mov [rel %s], rax\n",
+                        native_prefix, asm_symbol(q->result));
+            }
+            else if (strcmp(native_name, "Http") == 0 ||
+                     strcmp(native_name, "HttpTLS") == 0)
             {
                 char *http_args[] = {first, second, third, fourth};
 #if defined(_WIN32)
@@ -2868,8 +3104,141 @@ void generate_asm(FILE *f)
                     else
                         fprintf(f, "    lea %s, [rel %s]\n", registers[n], asm_symbol(http_args[n]));
                 }
-                fprintf(f, "    call %smx_http_request\n    mov [rel %s], rax\n",
-                        native_prefix, asm_symbol(q->result));
+                fprintf(f, "    call %smx_%s\n    mov [rel %s], rax\n",
+                        native_prefix,
+                        strcmp(native_name, "HttpTLS") == 0
+                            ? "https_request" : "http_request",
+                        asm_symbol(q->result));
+            }
+            else if (strncmp(native_name, "Socket", 6) == 0)
+            {
+                const char *native_args[] = {first, second, third, fourth};
+                const char *registers[] = {
+#if defined(_WIN32)
+                    "rcx", "rdx", "r8", "r9"
+#else
+                    "rdi", "rsi", "rdx", "rcx"
+#endif
+                };
+                int string_arg[4] = {0};
+                const char *function = NULL;
+                int argument_count = 0;
+                int returns_string = 0;
+
+                if (strcmp(native_name, "SocketTCPConectar") == 0)
+                {
+                    function = "mx_socket_tcp_connect";
+                    argument_count = 2;
+                    string_arg[0] = 1;
+                }
+                else if (strcmp(native_name, "SocketTLSCliente") == 0)
+                {
+                    function = "mx_socket_tls_client";
+                    argument_count = 2;
+                    string_arg[1] = 1;
+                }
+                else if (strcmp(native_name, "SocketTLSServidor") == 0)
+                {
+                    function = "mx_socket_tls_server";
+                    argument_count = 3;
+                    string_arg[1] = 1;
+                    string_arg[2] = 1;
+                }
+                else if (strcmp(native_name, "SocketTCPEscuchar") == 0)
+                {
+                    function = "mx_socket_tcp_listen";
+                    argument_count = 2;
+                }
+                else if (strcmp(native_name, "SocketTCPAceptar") == 0)
+                {
+                    function = "mx_socket_tcp_accept";
+                    argument_count = 1;
+                }
+                else if (strcmp(native_name, "SocketEnviar") == 0)
+                {
+                    function = "mx_socket_send";
+                    argument_count = 2;
+                    string_arg[1] = 1;
+                }
+                else if (strcmp(native_name, "SocketRecibir") == 0)
+                {
+                    function = "mx_socket_receive";
+                    argument_count = 2;
+                    returns_string = 1;
+                }
+                else if (strcmp(native_name, "SocketRecibirLinea") == 0)
+                {
+                    function = "mx_socket_receive_line";
+                    argument_count = 2;
+                    returns_string = 1;
+                }
+                else if (strcmp(native_name, "SocketUDP") == 0)
+                {
+                    function = "mx_socket_udp_bind";
+                    argument_count = 1;
+                }
+                else if (strcmp(native_name, "SocketEnviarUDP") == 0)
+                {
+                    function = "mx_socket_udp_send";
+                    argument_count = 4;
+                    string_arg[1] = 1;
+                    string_arg[3] = 1;
+                }
+                else if (strcmp(native_name, "SocketRecibirUDP") == 0)
+                {
+                    function = "mx_socket_udp_receive";
+                    argument_count = 2;
+                    returns_string = 1;
+                }
+                else if (strcmp(native_name, "SocketDireccionRemota") == 0)
+                {
+                    function = "mx_socket_remote_address";
+                    argument_count = 1;
+                    returns_string = 1;
+                }
+                else if (strcmp(native_name, "SocketPuertoLocal") == 0)
+                {
+                    function = "mx_socket_local_port";
+                    argument_count = 1;
+                }
+                else if (strcmp(native_name, "SocketTimeout") == 0)
+                {
+                    function = "mx_socket_set_timeout";
+                    argument_count = 3;
+                }
+                else if (strcmp(native_name, "SocketCerrar") == 0)
+                {
+                    function = "mx_socket_close";
+                    argument_count = 1;
+                }
+
+                for (int n = 0; n < argument_count; ++n)
+                {
+                    const char *argument = native_args[n];
+                    if (string_arg[n])
+                    {
+                        if (is_string_literal(argument))
+                            fprintf(f, "    lea %s, [rel str_native_%d_%d]\n",
+                                    registers[n], i, n);
+                        else
+                            fprintf(f, "    lea %s, [rel %s]\n",
+                                    registers[n], asm_symbol(argument));
+                    }
+                    else if (is_number(argument))
+                        fprintf(f, "    mov %s, %s\n", registers[n], argument);
+                    else
+                        fprintf(f, "    mov %s, [rel %s]\n",
+                                registers[n], asm_symbol(argument));
+                }
+                if (function)
+                {
+                    fprintf(f, "    call %s%s\n", native_prefix, function);
+                    if (q->result)
+                        fprintf(f, "    mov [rel %s], rax\n", asm_symbol(q->result));
+                    (void)returns_string;
+                }
+                else
+                    fprintf(stderr, "Error: funcion de socket no reconocida: %s\n", native_name);
             }
             else if (strcmp(asm_symbol(q->arg1), "HttpCuerpo") == 0)
             {
@@ -2911,12 +3280,16 @@ void generate_asm(FILE *f)
             {
                 if (is_string_literal(first))
                     fprintf(f, "    lea rdi, [rel str_native_%d_0]\n", i);
+                else if (es_temporal_prefijado(asm_symbol(first), 's'))
+                    fprintf(f, "    mov rdi, [rel %s]\n", asm_symbol(first));
                 else
                     fprintf(f, "    lea rdi, [rel %s]\n", asm_symbol(first));
                 if (second)
                 {
                     if (is_string_literal(second))
                         fprintf(f, "    lea rsi, [rel str_native_%d_1]\n", i);
+                    else if (es_temporal_prefijado(asm_symbol(second), 's'))
+                        fprintf(f, "    mov rsi, [rel %s]\n", asm_symbol(second));
                     else
                         fprintf(f, "    lea rsi, [rel %s]\n", asm_symbol(second));
                 }
@@ -3105,8 +3478,65 @@ void generate_asm(FILE *f)
             break;
 
         case IR_HALT:
-            fprintf(f, "    mov eax, 0\n");
             break;
+        case IR_DEBUG_STEP:
+#if defined(_WIN32)
+            fprintf(f, "    mov rcx, %s\n", q->arg1);
+#else
+            fprintf(f, "    mov rdi, %s\n", q->arg1);
+#endif
+            fprintf(f, "    call %smx_debugger_step\n", runtime_prefix);
+            break;
+        case IR_THROW:
+        {
+            int literal = is_string_literal(asm_symbol(q->arg1));
+#if defined(_WIN32)
+            if (literal) fprintf(f, "    lea rcx, [rel str_%d]\n", i);
+            else if (es_temporal_prefijado(q->arg1, 's'))
+                fprintf(f, "    mov rcx, [rel %s]\n", asm_symbol(q->arg1));
+            else fprintf(f, "    lea rcx, [rel %s]\n", asm_symbol(q->arg1));
+#else
+            if (literal) fprintf(f, "    lea rdi, [rel str_%d]\n", i);
+            else if (es_temporal_prefijado(q->arg1, 's'))
+                fprintf(f, "    mov rdi, [rel %s]\n", asm_symbol(q->arg1));
+            else fprintf(f, "    lea rdi, [rel %s]\n", asm_symbol(q->arg1));
+#endif
+            if (q->result)
+            {
+                fprintf(f, "    call %smx_set_exception\n    jmp %s\n",
+                        runtime_prefix, asm_symbol(q->result));
+            }
+            else
+                fprintf(f, "    call %smx_uncaught_exception\n    ud2\n", runtime_prefix);
+            break;
+        }
+        case IR_DIV_ZERO_CHECK:
+        {
+            int is_float = es_operando_flotante_codegen(q->arg1);
+            if (is_float)
+            {
+                cargar_float_en_xmm(f, asm_symbol(q->arg1), "xmm0");
+                fprintf(f, "    pxor xmm1, xmm1\n    ucomisd xmm0, xmm1\n    jne __mx_div_ok_%d\n", i);
+            }
+            else
+            {
+                emitir_carga_entero(f, "rax", asm_symbol(q->arg1));
+                fprintf(f, "    test rax, rax\n");
+                fprintf(f, "    jne __mx_div_ok_%d\n", i);
+            }
+#if defined(_WIN32)
+            fprintf(f, "    lea rcx, [rel __mx_div_zero_message]\n");
+#else
+            fprintf(f, "    lea rdi, [rel __mx_div_zero_message]\n");
+#endif
+            if (q->arg2)
+                fprintf(f, "    call %smx_set_exception\n    jmp %s\n",
+                        runtime_prefix, asm_symbol(q->arg2));
+            else
+                fprintf(f, "    call %smx_uncaught_exception\n    ud2\n", runtime_prefix);
+            fprintf(f, "__mx_div_ok_%d:\n", i);
+            break;
+        }
 
         default:
             fprintf(f, "    ; Operación no implementada: %d\n", q->op);
@@ -3162,7 +3592,9 @@ void generate_asm(FILE *f)
             switch (qf->op)
             {
             case IR_ASSIGN:
-                if (es_operando_flotante_codegen(qf->arg1)) { cargar_float_en_xmm(f, qf->arg1, "xmm0"); emitir_guardado_float(f, qf->result, "xmm0"); }
+                if (strstr(qf->result ? qf->result : "", "_b_") != NULL)
+                { emitir_carga_entero(f,"rax",qf->arg1); fprintf(f,"    test rax,rax\n    setne al\n    movzx rax,al\n"); emitir_guardado_entero(f,qf->result,"rax"); }
+                else if (es_operando_flotante_codegen(qf->arg1)) { cargar_float_en_xmm(f, qf->arg1, "xmm0"); emitir_guardado_float(f, qf->result, "xmm0"); }
                 else if (is_number(qf->arg1)) { fprintf(f, "    mov rax, %s\n", qf->arg1); emitir_guardado_entero(f, qf->result, "rax"); }
                 else { emitir_carga_entero(f, "rax", qf->arg1); emitir_guardado_entero(f, qf->result, "rax"); }
                 break;
@@ -3215,6 +3647,77 @@ void generate_asm(FILE *f)
                 emitir_carga_entero(f,"rcx",qf->arg2);
                 fprintf(f,"    test rcx,rcx\n    setne cl\n    movzx rcx,cl\n    or rax,rcx\n");
                 emitir_guardado_entero(f,qf->result,"rax");
+                break;
+            case IR_BIT_AND: case IR_BIT_OR: case IR_BIT_XOR:
+            case IR_SHIFT_LEFT: case IR_SHIFT_RIGHT:
+                emitir_carga_entero(f,"rax",qf->arg1);
+                emitir_carga_entero(f,"rcx",qf->arg2);
+                fprintf(f,"    %s rax, %s\n",
+                        qf->op==IR_BIT_AND?"and":qf->op==IR_BIT_OR?"or":
+                        qf->op==IR_BIT_XOR?"xor":qf->op==IR_SHIFT_LEFT?"shl":"sar",
+                        (qf->op==IR_SHIFT_LEFT||qf->op==IR_SHIFT_RIGHT)?"cl":"rcx");
+                emitir_guardado_entero(f,qf->result,"rax");
+                break;
+            case IR_BIT_NOT:
+                emitir_carga_entero(f,"rax",qf->arg1);
+                fprintf(f,"    not rax\n");
+                emitir_guardado_entero(f,qf->result,"rax");
+                break;
+            case IR_DIV_ZERO_CHECK:
+            {
+                if (es_operando_flotante_codegen(qf->arg1))
+                {
+                    cargar_float_en_xmm(f, qf->arg1, "xmm0");
+                    fprintf(f, "    pxor xmm1, xmm1\n    ucomisd xmm0, xmm1\n    jne __mx_div_ok_%d\n", j);
+                }
+                else
+                {
+                    emitir_carga_entero(f, "rax", qf->arg1);
+                    fprintf(f, "    test rax, rax\n    jne __mx_div_ok_%d\n", j);
+                }
+#if defined(_WIN32)
+                fprintf(f, "    lea rcx, [rel __mx_div_zero_message]\n");
+#else
+                fprintf(f, "    lea rdi, [rel __mx_div_zero_message]\n");
+#endif
+                if (qf->arg2)
+                    fprintf(f, "    call %smx_set_exception\n    jmp %s\n",
+                            runtime_prefix, asm_symbol(qf->arg2));
+                else
+                    fprintf(f, "    call %smx_uncaught_exception\n    ud2\n", runtime_prefix);
+                fprintf(f, "__mx_div_ok_%d:\n", j);
+                break;
+            }
+            case IR_DEBUG_STEP:
+#if defined(_WIN32)
+                fprintf(f, "    mov rcx, %s\n", qf->arg1);
+#else
+                fprintf(f, "    mov rdi, %s\n", qf->arg1);
+#endif
+                fprintf(f, "    call %smx_debugger_step\n", runtime_prefix);
+                break;
+            case IR_THROW:
+#if defined(_WIN32)
+                if (es_temporal_prefijado(qf->arg1, 's'))
+                    emitir_carga_entero(f, "rcx", qf->arg1);
+                else
+                    fprintf(f, "    lea rcx, %s\n", mem_ref(qf->arg1));
+                if (qf->result)
+                    fprintf(f, "    call %smx_set_exception\n    jmp %s\n",
+                            runtime_prefix, asm_symbol(qf->result));
+                else
+                    fprintf(f, "    call %smx_uncaught_exception\n    ud2\n", runtime_prefix);
+#else
+                if (es_temporal_prefijado(qf->arg1, 's'))
+                    emitir_carga_entero(f, "rdi", qf->arg1);
+                else
+                    fprintf(f, "    lea rdi, %s\n", mem_ref(qf->arg1));
+                if (qf->result)
+                    fprintf(f, "    call %smx_set_exception\n    jmp %s\n",
+                            runtime_prefix, asm_symbol(qf->result));
+                else
+                    fprintf(f, "    call %smx_uncaught_exception\n    ud2\n", runtime_prefix);
+#endif
                 break;
             case IR_NOT: emitir_carga_entero(f,"rax",qf->arg1); fprintf(f,"    cmp rax,0\n    sete al\n    movzx rax,al\n"); emitir_guardado_entero(f,qf->result,"rax"); break;
             case IR_LOAD_ARRAY:
@@ -3307,6 +3810,7 @@ static int es_palabra_reservada_asm(const char *s)
         return 0;
 
     static const char *reservadas[] = {
+        "bits", "use16", "use32", "use64",
         "aaa", "aad", "aam", "aas",
         "adc", "add", "and", "call", "cbw", "cdq", "cdqe",
         "clc", "cld", "cli", "cmc", "cmp", "cqo", "cwd", "cwde",
@@ -3433,6 +3937,7 @@ void generar_codigo_intermedio(ASTNode *root_ast_node, TablaSimbolos *global_sym
             emit_quad(IR_FUNCTION_END, NULL, NULL, NULL);
 
             free(current_function_end_label);
+            free(current_return_storage);
             current_function_end_label = prev_end;
             current_return_storage = prev_storage;
             current_return_type = prev_type;
@@ -3475,6 +3980,7 @@ void init_ir_generator(void)
     current_return_value = NULL;
     current_return_value_owned = 0;
     current_return_type = TIPO_ERROR;
+    exception_handler_depth = 0;
 }
 
 /**
@@ -3552,6 +4058,16 @@ static void generate_code_for_node(ASTNode *node)
         return;
     }
 
+    if (interactive_debugger_enabled &&
+        node->type != AST_PROGRAMA && node->type != AST_LISTA_SENTENCIAS &&
+        node->type != AST_BLOQUE && node->type != AST_FUNCION &&
+        node->type != AST_DECLARACION_TIPO)
+    {
+        char line[32];
+        snprintf(line, sizeof(line), "%d", node->renglon);
+        emit_quad(IR_DEBUG_STEP, line, NULL, NULL);
+    }
+
     switch (node->type)
     {
     case AST_PROGRAMA:
@@ -3560,7 +4076,11 @@ static void generate_code_for_node(ASTNode *node)
     {
         TablaSimbolos *ambito_anterior = ambito_actual;
 
-        if (ambito_actual->num_hijos > 0)
+        if (node->symbol_scope)
+        {
+            ambito_actual = node->symbol_scope;
+        }
+        else if (ambito_actual->num_hijos > 0)
         {
             ambito_actual = ambito_actual->hijos[0];
         }
@@ -3619,6 +4139,7 @@ static void generate_code_for_node(ASTNode *node)
             }
 
             emit_quad(IR_ASSIGN, v, NULL, return_name);
+            free(v);
             current_return_value = return_name;
             current_return_value_owned = current_inline_function ? 0 : 0;
 
@@ -3626,9 +4147,42 @@ static void generate_code_for_node(ASTNode *node)
                 emit_quad(IR_GOTO, NULL, NULL, current_function_end_label);
         }
         break;
-    case AST_LLAMADA:
-        (void)generate_code_for_expression(node);
+    case AST_TRY_STMT:
+    {
+        char *catch_label = new_label();
+        char *end_label = new_label();
+        if (exception_handler_depth >= (int)(sizeof(exception_handler_labels) / sizeof(exception_handler_labels[0])))
+        {
+            fprintf(stderr, "Error: demasiados bloques Intentar anidados para la generacion de codigo.\n");
+            exit(EXIT_FAILURE);
+        }
+        exception_handler_labels[exception_handler_depth++] = catch_label;
+        generate_code_for_node(node->hijo_izq);
+        --exception_handler_depth;
+        emit_quad(IR_GOTO, NULL, NULL, end_label);
+        emit_quad(IR_LABEL, NULL, NULL, catch_label);
+        generate_code_for_node(node->hijo_der);
+        emit_quad(IR_LABEL, NULL, NULL, end_label);
+        free(catch_label);
+        free(end_label);
         break;
+    }
+    case AST_THROW_STMT:
+    {
+        char *message = generate_code_for_expression(node->hijo_izq);
+        const char *handler = exception_handler_depth > 0
+                                  ? exception_handler_labels[exception_handler_depth - 1]
+                                  : NULL;
+        emit_quad(IR_THROW, message, NULL, handler);
+        free(message);
+        break;
+    }
+    case AST_LLAMADA:
+    {
+        char *result = generate_code_for_expression(node);
+        free(result);
+        break;
+    }
 
     case AST_ASIGNACION_STMT:
     case AST_MOSTRAR_STMT:
@@ -3681,6 +4235,12 @@ static void generate_code_for_node(ASTNode *node)
     case AST_MULT_EXPR:
     case AST_DIV_EXPR:
     case AST_MOD_EXPR:
+    case AST_BIT_AND_EXPR:
+    case AST_BIT_OR_EXPR:
+    case AST_BIT_XOR_EXPR:
+    case AST_SHIFT_LEFT_EXPR:
+    case AST_SHIFT_RIGHT_EXPR:
+    case AST_BIT_NOT_EXPR:
     case AST_NEGACION_UNARIA_EXPR:
     case AST_IDENTIFICADOR:
     case AST_LITERAL_ENTERO:

@@ -1,0 +1,41 @@
+Cadena recibido = "";
+
+Intentar {
+    Lanzar("fallo explicito");
+} Capturar (error) {
+    recibido = ObtenerMensaje(error);
+    Si (Comparar(error, "fallo explicito") != 0 ||
+        Comparar(ObtenerMensaje(error), "fallo explicito") != 0 ||
+        Comparar(recibido, "fallo explicito") != 0) {
+        Lanzar("La variable de captura no conserva el mensaje.");
+    }
+}
+
+Intentar {
+    Entero resultado = 8 / 0;
+    Mostrar(resultado, "\n");
+} Capturar (errorDivision) {
+    Si (Longitud(ObtenerMensaje(errorDivision)) < 1) {
+        Lanzar("La division entre cero no produjo un mensaje.");
+    }
+}
+
+Intentar {
+    Intentar {
+        Lanzar("fallo anidado");
+    } Capturar (errorInterno) {
+        Lanzar(ObtenerMensaje(errorInterno));
+    }
+} Capturar (errorExterno) {
+    Si (Comparar(errorExterno, "fallo anidado") != 0) {
+        Lanzar("La excepcion anidada perdio su mensaje.");
+    }
+}
+
+Intentar {
+    Lanzar("captura compatible");
+} Capturar {
+    Mostrar(UltimoError(), "\n");
+}
+
+Mostrar("EXCEPCIONES_MODERNAS_OK\n");

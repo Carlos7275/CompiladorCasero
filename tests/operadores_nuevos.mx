@@ -1,0 +1,35 @@
+Entero bits = (6 & 3) | (1 << 4);
+bits ^= 1;
+bits <<= 1;
+Booleano activo = 7;
+Booleano falso = 0;
+
+Mostrar(bits, "\n");
+Mostrar(activo, " ", falso, "\n");
+Si (activo && !falso && bits == 38) {
+    Mostrar("condicion entera/booleana correcta\n");
+}
+Mostrar(~0, " ", (16 >> 2), " ", (7 ^ 3), "\n");
+
+Intentar {
+    Lanzar("error de prueba");
+    Mostrar("no debe aparecer\n");
+} Capturar {
+    Mostrar(UltimoError(), "\n");
+}
+
+Intentar {
+    Entero cero = 0;
+    Entero imposible = 12 / cero;
+    Mostrar(imposible, "\n");
+} Capturar {
+    Mostrar(UltimoError(), "\n");
+}
+
+Intentar {
+    Flotante ceroFlotante = 0.0;
+    Flotante imposibleFlotante = 12.0 / ceroFlotante;
+    Mostrar(imposibleFlotante, "\n");
+} Capturar {
+    Mostrar(UltimoError(), "\n");
+}

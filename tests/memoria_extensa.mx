@@ -1,0 +1,152 @@
+Tipo Registro {
+    Entero identificador;
+    Flotante medida;
+    Booleano activo;
+    Cadena etiqueta;
+};
+
+Entero sumarHasta(Entero limite) {
+    Entero total = 0;
+    Para (Entero indice = 1; indice <= limite; indice++) {
+        total = total + indice;
+    }
+    Retornar total;
+}
+
+Entero factorial(Entero valor) {
+    Si (valor <= 1) {
+        Retornar 1;
+    }
+    Retornar valor * factorial(valor - 1);
+}
+
+Entero enteros[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+Flotante reales[4] = {1.5, 2.5, 3.5, 4.5};
+Registro registro;
+Entero iteracion = 0;
+Entero suma = 0;
+Entero resultado = 0;
+Entero archivo = -1;
+Entero bytes = 0;
+Cadena linea = "";
+Cadena entradaTexto = "";
+Cadena ruta = "memory_stress.tmp";
+Entero entradaEntera = 0;
+Flotante entradaFlotante = 0.0;
+Booleano entradaBooleana = Falso;
+Booleano existeVariable = Falso;
+Cadena variableEntorno = "";
+Flotante valorFlotante = 0.0;
+Entero valorEntero = 0;
+
+registro.identificador = 42;
+registro.medida = 72.5;
+registro.activo = 3;
+registro.etiqueta = "registro de prueba";
+
+Leer(entradaEntera);
+Leer(entradaFlotante);
+Leer(entradaBooleana);
+Leer(entradaTexto);
+
+Si (entradaEntera != 12345 || entradaFlotante < 19.5 ||
+    entradaFlotante > 19.6 || !entradaBooleana ||
+    Comparar(entradaTexto, "texto con espacios") != 0) {
+    Lanzar("Fallo la lectura de entrada tipada.");
+}
+
+Si (!registro.activo || registro.identificador != 42 ||
+    registro.medida < 72.4 || Comparar(registro.etiqueta, "registro de prueba") != 0) {
+    Lanzar("Fallo el tipo personalizado o la conversion booleana.");
+}
+
+Para (Entero indice = 0; indice < 8; indice++) {
+    enteros[indice] = enteros[indice] * 3 + indice;
+    suma = suma + enteros[indice];
+}
+
+Para (Entero indice = 0; indice < 4; indice++) {
+    reales[indice] = reales[indice] + 0.25;
+}
+
+Si (sumarHasta(100) != 5050 || factorial(12) != 479001600 ||
+    enteros[0] != 3 || enteros[7] != 31 ||
+    reales[0] < 1.7 || reales[0] > 1.8) {
+    Lanzar("Fallo el stress de funciones, recursion o arrays.");
+}
+
+iteracion = 0;
+Mientras (iteracion < 3000) {
+    resultado = sumarHasta(10) + factorial(6);
+    valorFlotante = Potencia(2.0, 8.0) + RaizCuadrada(81.0);
+    valorFlotante = valorFlotante + Seno(0.0) + Coseno(0.0);
+    valorFlotante = valorFlotante + Tangente(0.0) + Logaritmo(1.0);
+    valorFlotante = valorFlotante + Exponencial(0.0);
+    valorFlotante = valorFlotante + Piso(3.8) + Techo(3.2);
+    valorFlotante = Decimales(valorFlotante, 2);
+    valorEntero = Abs(0 - iteracion) + Absoluto(0 - iteracion);
+
+    Si (Min(iteracion, 3000) > Max(iteracion, 3000) ||
+        Redondear(2.0) != 2 || Longitud("mx stress") != 9 ||
+        Comparar("mx", "mx") != 0 || !Contiene("lenguaje mx", "mx") ||
+        Aleatorio() < 0 || Aleatorio(7) < 0 ||
+        AleatorioEntre(1, 9) < 1 || AleatorioEntre(1, 9) > 9) {
+        Lanzar("Fallo una funcion nativa durante la iteracion.");
+    }
+    iteracion = iteracion + 1;
+}
+
+existeVariable = ExisteEntorno("MX_STRESS_ENV");
+variableEntorno = Entorno("MX_STRESS_ENV");
+Si (!existeVariable || Comparar(variableEntorno, "stress-activo") != 0) {
+    Lanzar("Fallo la lectura de variables de entorno.");
+}
+
+iteracion = 0;
+Mientras (iteracion < 64) {
+    archivo = AbrirArchivo(ruta, "w");
+    Si (archivo < 1) {
+        Lanzar(UltimoError());
+    }
+    bytes = EscribirArchivo(archivo, "contenido de stress");
+    Si (bytes != 19 || !CerrarArchivo(archivo)) {
+        Lanzar("Fallo al escribir o cerrar un archivo.");
+    }
+
+    archivo = AbrirArchivo(ruta, "r");
+    Si (archivo < 1) {
+        Lanzar(UltimoError());
+    }
+    linea = LeerTodoArchivo(archivo);
+    Si (Comparar(linea, "contenido de stress") != 0 ||
+        !CerrarArchivo(archivo) || !EliminarArchivo(ruta)) {
+        Lanzar("Fallo al leer, cerrar o eliminar un archivo.");
+    }
+    iteracion = iteracion + 1;
+}
+
+Intentar {
+    Lanzar("excepcion controlada");
+} Capturar {
+    Si (Longitud(UltimoError()) < 1) {
+        Lanzar("Fallo la captura de una excepcion explicita.");
+    }
+}
+
+Intentar {
+    Lanzar("captura moderna");
+} Capturar (errorCapturado) {
+    Si (Comparar(ObtenerMensaje(errorCapturado), "captura moderna") != 0) {
+        Lanzar("Fallo la variable de captura moderna.");
+    }
+}
+
+Intentar {
+    valorEntero = 100 / 0;
+} Capturar {
+    Si (Longitud(UltimoError()) < 1) {
+        Lanzar("Fallo la captura de division por cero.");
+    }
+}
+
+Mostrar("MEMORIA_EXTENSA_OK: stress completo de funciones, arrays, nativas, entorno, archivos y excepciones.\n");

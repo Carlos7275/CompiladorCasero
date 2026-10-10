@@ -1,0 +1,41 @@
+Entero servidor;
+Entero puerto;
+Entero cliente;
+Entero conexion;
+Cadena mensajeServidor = "";
+Cadena mensajeCliente = "";
+
+Para (Entero ronda = 0; ronda < 16; ronda++) {
+    servidor = SocketTCPEscuchar(0, 4);
+    Si (servidor < 1) {
+        Lanzar(UltimoError());
+    }
+
+    puerto = SocketPuertoLocal(servidor);
+    cliente = SocketTCPConectar("127.0.0.1", puerto);
+    conexion = SocketTCPAceptar(servidor);
+    Si (cliente < 1 || conexion < 1) {
+        Lanzar(UltimoError());
+    }
+
+    SocketTimeout(cliente, 2000, 2000);
+    SocketTimeout(conexion, 2000, 2000);
+
+    SocketEnviar(cliente, "hola servidor");
+    mensajeServidor = SocketRecibir(conexion, 255);
+    Si (Comparar(mensajeServidor, "hola servidor") != 0) {
+        Lanzar("El servidor recibio un mensaje incorrecto.");
+    }
+
+    SocketEnviar(conexion, "hola cliente");
+    mensajeCliente = SocketRecibir(cliente, 255);
+    Si (Comparar(mensajeCliente, "hola cliente") != 0) {
+        Lanzar("El cliente recibio un mensaje incorrecto.");
+    }
+
+    SocketCerrar(cliente);
+    SocketCerrar(conexion);
+    SocketCerrar(servidor);
+}
+
+Mostrar("CHAT_OK: 16 conversaciones TCP completas; todos los sockets cerrados.\n");

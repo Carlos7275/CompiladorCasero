@@ -9,5 +9,13 @@ void log_error(const char *phase, const char *fmt, ...);
 void log_warning(const char *phase, const char *fmt, ...);
 void log_info(const char *phase, const char *fmt, ...);
 void log_success(const char *phase, const char *fmt, ...);
+void set_diagnostics_json(int enabled);
+int diagnostics_json_enabled(void);
+void set_diagnostic_file(const char *path);
+void report_diagnostic(const char *code, const char *severity, const char *source,
+                       int line, int column, const char *message);
+void report_diagnosticf(const char *code, const char *severity, const char *source,
+                        int line, int column, const char *fmt, ...);
+void emit_diagnostics_json(void);
 
 #endif

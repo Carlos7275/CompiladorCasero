@@ -22,14 +22,24 @@ xcode-select --install
 # Instalar CMake (si no está)
 brew install cmake
 
+# Opcional: soporte TLS para programas Mx
+brew install openssl@3
+
 # NASM se instala automáticamente con build.sh
 ```
+
+El backend produce ejecutables x86-64. En Apple Silicon, los programas se
+ejecutan con Rosetta 2 y el OpenSSL detectado por CMake debe incluir librerías
+x86-64. Si se usa Homebrew bajo Rosetta, configure `OPENSSL_ROOT_DIR` con el
+prefijo de esa instalación antes de compilar.
 
 #### Ubuntu/Debian
 ```bash
 # Instalar dependencias
 sudo apt-get update
 sudo apt-get install build-essential cmake nasm
+# Opcional: soporte TLS para programas Mx
+sudo apt-get install libssl-dev
 
 # Verificar CMake
 cmake --version
@@ -41,6 +51,7 @@ cmake --version
 # 1. Visual Studio Community (con C++ workload)
 # 2. CMake: https://cmake.org/download/
 # 3. NASM: https://www.nasm.us/
+# 4. OpenSSL 1.1.1+ para la toolchain elegida (opcional, solo TLS)
 
 # Verificar instalación
 cmake --version

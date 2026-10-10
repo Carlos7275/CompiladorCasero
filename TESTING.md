@@ -2,7 +2,8 @@
 
 ## 🧪 Suite de Pruebas Integral
 
-El compilador Casero incluye una suite completa de 13 programas de prueba que cubren todas las características del lenguaje Mx.
+El compilador Casero incluye una suite que ejecuta todos los programas `.mx`
+de `tests/` en Linux/macOS y Windows.
 
 ## 🚀 Ejecución Rápida
 
@@ -15,6 +16,22 @@ En Windows PowerShell:
 ```powershell
 .\run_tests.ps1
 ```
+
+### Stress de memoria del lenguaje
+
+En macOS, ejecuta `sh ./run_memory_tests.sh`; el script usa `leaks` para
+inspeccionar por separado el proceso del compilador y el programa Mx generado.
+En Linux ejecuta el mismo script con Valgrind instalado. En Windows usa
+`.\run_memory_tests.ps1` con Dr. Memory disponible en `PATH`. Los runners
+fallan si no encuentran su herramienta de análisis, si el stress no llega al
+marcador final o si el analizador reporta errores/fugas.
+
+`tests/memoria_extensa.mx` estresa funciones normales y recursivas, bucles,
+arrays enteros y flotantes, tipos personalizados, conversiones booleano/entero,
+entrada tipada, funciones matemáticas y de cadenas, variables de entorno,
+apertura/escritura/lectura/cierre/eliminación repetida de archivos y excepciones.
+No inicia sockets, HTTP/TLS ni el debugger interactivo: esos casos requieren
+servicios externos, dependencias opcionales o entrada de control propia.
 
 Salida esperada:
 ```
@@ -33,13 +50,13 @@ Output:
 ─────────────────────────────────────
 ✓ Ejecución exitosa
 
-[... 12 pruebas más ...]
+[... resto de los programas de prueba ...]
 
 =====================================
 RESUMEN DE RESULTADOS
 =====================================
-Total de pruebas:    13
-Exitosas:            13
+Total de pruebas:    [cantidad de archivos .mx]
+Exitosas:            [cantidad de archivos .mx]
 Fallidas:            0
 
 ✓ TODAS LAS PRUEBAS PASARON CORRECTAMENTE
@@ -60,6 +77,29 @@ Fallidas:            0
 
 **Entrada**: Número entre 1 y 100 (proporciona automáticamente 42)
 **Líneas**: ~25
+
+### sockets_chat.mx - Regresion TCP local
+
+**Propósito**: Verificar intercambios cliente/servidor TCP bidireccionales y
+el cierre repetido de recursos de red.
+
+**Características probadas**:
+- ✅ Listener en puerto efímero y conexión por loopback
+- ✅ Intercambio de mensajes en ambos sentidos
+- ✅ Verificación del contenido recibido
+- ✅ 16 rondas consecutivas cerrando cliente, conexión y listener
+
+En macOS, puede revisarse memoria dinámica al salir con:
+
+```bash
+leaks --atExit -- /tmp/compilador_test_sockets_chat
+```
+
+El chat interactivo para dos terminales está en
+`examples/sockets_chat_servidor.mx` y `examples/sockets_chat_cliente.mx`.
+Usa `SocketRecibirLinea` para delimitar mensajes en el flujo TCP. Consulta la
+sección “Chat TCP interactivo de 16 mensajes” del README para compilarlo e
+iniciarlo.
 
 ### 2. calculadora.mx - Operaciones Aritméticas
 
@@ -233,11 +273,26 @@ Fallidas:            0
 # Muestra: AST, Tabla de Símbolos, IR, ASM
 ```
 
+### Depuración Interactiva
+```bash
+./build/bin/compilador tests/operadores_nuevos.mx debug_test -debugger
+# s: siguiente sentencia, c: continuar, b LINEA: breakpoint, q: salir
+```
+
 ### Compilar y Conservar ASM
 ```bash
 ./build/bin/compilador tests/ejemplo1.mx test_result -asm
 # Genera: test_result, test_result.asm, test_result.o
 ```
+
+### Diagnosticos para IDE
+```bash
+./build/bin/compilador tests/ejemplo1.mx --diagnostics=json
+```
+
+La opcion valida lexer, parser y semantica, y devuelve un objeto JSON en
+`stdout`; sus rangos usan indices desde cero. En exito, `diagnostics` es una
+lista vacia.
 
 ### Compilar y Ejecutar
 ```bash
@@ -269,6 +324,12 @@ Fallidas:            0
 | Romper | (implícito en bucles) |
 | Mostrar | todos |
 | Leer | ejemplo1.mx, adivinanza.mx, etc |
+| Archivos | archivos_basico.mx |
+| Bitwise y asignaciones compuestas | operadores_nuevos.mx |
+| Entero a Booleano y condiciones | operadores_nuevos.mx |
+| Intentar/Capturar/Lanzar | operadores_nuevos.mx |
+| Variable de captura, ObtenerMensaje y excepciones anidadas | excepciones_modernas.mx |
+| Sockets UDP, timeout y puerto efimero | sockets_avanzados.mx |
 
 ## 🔍 Interpretación de Resultados
 

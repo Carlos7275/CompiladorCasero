@@ -8,6 +8,7 @@
 #include "parser.h"
 #include "symbols.h"
 #include "semantic.h"
+#include "errors.h"
 extern const char *DataTypeNames[];
 
 TablaSimbolos *ambito_actual;
@@ -30,6 +31,7 @@ typedef struct
 
 static const FuncionNativa funciones_nativas[] = {
     {"Http", INT, STRING, STRING, 4, STRING, STRING},
+    {"HttpTLS", INT, STRING, STRING, 4, STRING, STRING},
     {"Abs", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
     {"Absoluto", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
     {"Min", INT, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
@@ -54,6 +56,30 @@ static const FuncionNativa funciones_nativas[] = {
     {"ExisteEntorno", BOOL, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
     {"HttpCuerpo", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
     {"HttpCabeceras", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
+    {"AbrirArchivo", INT, STRING, STRING, 2, TIPO_ERROR, TIPO_ERROR},
+    {"LeerLinea", STRING, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"LeerTodoArchivo", STRING, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"EscribirArchivo", INT, INT, STRING, 2, TIPO_ERROR, TIPO_ERROR},
+    {"FinArchivo", BOOL, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"CerrarArchivo", BOOL, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"UltimoError", STRING, TIPO_ERROR, TIPO_ERROR, 0, TIPO_ERROR, TIPO_ERROR},
+    {"ObtenerMensaje", STRING, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"EliminarArchivo", BOOL, STRING, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"SocketTCPConectar", INT, STRING, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketTLSCliente", BOOL, INT, STRING, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketTLSServidor", BOOL, INT, STRING, 3, STRING, TIPO_ERROR},
+    {"SocketTCPEscuchar", INT, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketTCPAceptar", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"SocketEnviar", INT, INT, STRING, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketRecibir", STRING, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketRecibirLinea", STRING, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketUDP", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"SocketEnviarUDP", INT, INT, STRING, 4, INT, STRING},
+    {"SocketRecibirUDP", STRING, INT, INT, 2, TIPO_ERROR, TIPO_ERROR},
+    {"SocketDireccionRemota", STRING, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"SocketPuertoLocal", INT, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
+    {"SocketTimeout", BOOL, INT, INT, 3, INT, TIPO_ERROR},
+    {"SocketCerrar", BOOL, INT, TIPO_ERROR, 1, TIPO_ERROR, TIPO_ERROR},
      {"Decimales", FLOAT, FLOAT, INT, 2, TIPO_ERROR, TIPO_ERROR}
 };
 
@@ -101,6 +127,8 @@ void reportar_error_semantico(int renglon, int columna, const char *formato, ...
     vsnprintf(nuevo_error->mensaje, sizeof(nuevo_error->mensaje), formato, args);
     va_end(args);
 
+    report_diagnostic("MX3000", "error", "semantic", renglon, columna,
+                      nuevo_error->mensaje);
     nuevo_error->sig = cabeza_errores;
     cabeza_errores = nuevo_error;
     contador_errores_semanticos++;
@@ -111,6 +139,21 @@ void reportar_error_semantico(int renglon, int columna, const char *formato, ...
  */
 void imprimir_errores_semanticos(void)
 {
+    if (diagnostics_json_enabled())
+    {
+        emit_diagnostics_json();
+        struct ErrorSemantico *actual_json = cabeza_errores;
+        while (actual_json)
+        {
+            struct ErrorSemantico *next = actual_json->sig;
+            free(actual_json);
+            actual_json = next;
+        }
+        cabeza_errores = NULL;
+        contador_errores_semanticos = 0;
+        return;
+    }
+
     if (cabeza_errores == NULL)
     {
         printf("No se detectaron errores semanticos.\n");
@@ -295,15 +338,6 @@ static void verificar_asignacion_expresion(int renglon, int columna,
 
     if (tipo_destino == BOOL && tipo_origen == INT)
     {
-        if (expresion->type == AST_LITERAL_ENTERO &&
-            (expresion->valor.valor_entero == 0 || expresion->valor.valor_entero == 1))
-        {
-            return;
-        }
-
-        reportar_error_semantico(renglon, columna,
-                                 "No se puede asignar Entero a Booleano: solo los valores 0 y 1 "
-                                 "son compatibles en una asignacion directa.");
         return;
     }
 
@@ -328,13 +362,15 @@ enum TipoDato verificar_expresion_aritmetica(int renglon, int columna, enum Tipo
 
     if (tipo1 == FLOAT || tipo2 == FLOAT)
     {
-        if ((tipo1 == INT || tipo1 == FLOAT) && (tipo2 == INT || tipo2 == FLOAT))
+        if ((tipo1 == INT || tipo1 == FLOAT || tipo1 == BOOL) &&
+            (tipo2 == INT || tipo2 == FLOAT || tipo2 == BOOL))
         {
             return FLOAT;
         }
     }
 
-    if (tipo1 == INT && tipo2 == INT)
+    if ((tipo1 == INT || tipo1 == BOOL) &&
+        (tipo2 == INT || tipo2 == BOOL))
     {
         return INT;
     }
@@ -366,8 +402,8 @@ enum TipoDato verificar_expresion_comparacion(int renglon, int columna, enum Tip
         return TIPO_ERROR;
     }
 
-    if ((tipo1 == INT || tipo1 == FLOAT) &&
-        (tipo2 == INT || tipo2 == FLOAT))
+    if ((tipo1 == INT || tipo1 == FLOAT || tipo1 == BOOL) &&
+        (tipo2 == INT || tipo2 == FLOAT || tipo2 == BOOL))
     {
         return BOOL;
     }
@@ -428,9 +464,9 @@ enum TipoDato verificar_negacion_unaria(int renglon, int columna, enum TipoDato 
         return TIPO_ERROR;
     }
 
-    if (tipo == INT || tipo == FLOAT)
+    if (tipo == INT || tipo == FLOAT || tipo == BOOL)
     {
-        return tipo;
+        return tipo == BOOL ? INT : tipo;
     }
 
     reportar_error_semantico(renglon, columna,
@@ -590,6 +626,17 @@ void visit_ast_semantic(ASTNode *node)
     case AST_RETORNAR_STMT:
         if (node->hijo_izq) visit_ast_semantic(node->hijo_izq);
         break;
+    case AST_TRY_STMT:
+        visit_ast_semantic(node->hijo_izq);
+        visit_ast_semantic(node->hijo_der);
+        break;
+    case AST_THROW_STMT:
+        visit_ast_semantic(node->hijo_izq);
+        if (node->hijo_izq && node->hijo_izq->resolved_type != STRING &&
+            node->hijo_izq->resolved_type != TIPO_ERROR)
+            reportar_error_semantico(node->renglon, node->columna,
+                                     "Lanzar requiere un mensaje de tipo Cadena.");
+        break;
     case AST_PROGRAMA:
     {
         ASTNode *current_child = node->hijo_izq;
@@ -605,6 +652,7 @@ void visit_ast_semantic(ASTNode *node)
     case AST_BLOQUE:
     {
         TablaSimbolos *nuevo_ambito = crear_tabla_simbolos(ambito_actual);
+        node->symbol_scope = nuevo_ambito;
         ambito_actual = nuevo_ambito;
 
         ASTNode *current = node->hijo_izq;
@@ -895,6 +943,7 @@ void visit_ast_semantic(ASTNode *node)
     case AST_RESTA_EXPR:
     case AST_MULT_EXPR:
     case AST_DIV_EXPR:
+    case AST_MOD_EXPR:
     {
         visit_ast_semantic(node->hijo_izq);
         visit_ast_semantic(node->hijo_der);
@@ -902,6 +951,43 @@ void visit_ast_semantic(ASTNode *node)
             node->renglon, node->columna,
             node->hijo_izq->resolved_type,
             node->hijo_der->resolved_type);
+        break;
+    }
+    case AST_BIT_AND_EXPR:
+    case AST_BIT_OR_EXPR:
+    case AST_BIT_XOR_EXPR:
+    case AST_SHIFT_LEFT_EXPR:
+    case AST_SHIFT_RIGHT_EXPR:
+    {
+        visit_ast_semantic(node->hijo_izq);
+        visit_ast_semantic(node->hijo_der);
+        enum TipoDato left = node->hijo_izq ? node->hijo_izq->resolved_type : TIPO_ERROR;
+        enum TipoDato right = node->hijo_der ? node->hijo_der->resolved_type : TIPO_ERROR;
+        if (left == TIPO_ERROR || right == TIPO_ERROR)
+            node->resolved_type = TIPO_ERROR;
+        else if ((left == INT || left == BOOL) &&
+                 (right == INT || right == BOOL))
+            node->resolved_type = INT;
+        else
+        {
+            reportar_error_semantico(node->renglon, node->columna,
+                                     "Los operadores bitwise requieren operandos Entero.");
+            node->resolved_type = TIPO_ERROR;
+        }
+        break;
+    }
+    case AST_BIT_NOT_EXPR:
+    {
+        visit_ast_semantic(node->hijo_izq);
+        enum TipoDato operand = node->hijo_izq ? node->hijo_izq->resolved_type : TIPO_ERROR;
+        if (operand == INT || operand == BOOL || operand == TIPO_ERROR)
+            node->resolved_type = operand == BOOL ? INT : operand;
+        else
+        {
+            reportar_error_semantico(node->renglon, node->columna,
+                                     "El operador bitwise '~' requiere un operando Entero.");
+            node->resolved_type = TIPO_ERROR;
+        }
         break;
     }
     case AST_OR_EXPR:
@@ -982,6 +1068,7 @@ void visit_ast_semantic(ASTNode *node)
         visit_ast_semantic(node->hijo_der);
 
         if (node->hijo_der->resolved_type != INT &&
+            node->hijo_der->resolved_type != BOOL &&
             node->hijo_der->resolved_type != TIPO_ERROR)
         {
             reportar_error_semantico(
