@@ -320,6 +320,20 @@ vacia o `Falso`, segun la operacion, y dejan detalles en `UltimoError()`.
 `SocketRecibirLinea` espera hasta recibir un salto de linea y elimina `CR/LF`;
 es útil para delimitar mensajes de chat sobre TCP.
 
+También se puede usar la interfaz orientada a objetos; las funciones anteriores
+siguen disponibles:
+```mx
+Socket servidor = Socket.escuchar(0, 4);
+Entero puerto = servidor.puertoLocal();
+Socket cliente = Socket.conectar("127.0.0.1", puerto);
+Socket conexion = servidor.aceptar();
+cliente.enviar("hola");
+Cadena mensaje = conexion.recibir(255);
+cliente.cerrar();
+conexion.cerrar();
+servidor.cerrar();
+```
+
 #### Chat TCP interactivo de 16 mensajes
 
 El ejemplo de chat funciona en dos terminales y muestra cada mensaje al
@@ -444,7 +458,26 @@ Los campos pueden leerse y asignarse con notación de punto:
 p.edad = 35;
 Mostrar(p.edad);
 ```
-Internamente los campos se almacenan como miembros planos, por lo que actualmente se admiten campos de tipos primitivos.
+Las clases admiten objetos independientes, herencia simple, control de acceso y
+despacho virtual. Los miembros son privados por defecto; `Publico`, `Protegido`
+y `Privado` pueden aparecer antes de cada campo o método. `Sobrescribe` requiere
+un método base marcado `Virtual`:
+```mx
+Clase Entidad {
+    Protegido Entero codigo;
+    Publico Virtual Entero valor() { Retornar este.codigo; }
+};
+
+Clase Usuario Hereda Entidad {
+    Publico Sobrescribe Entero valor() { Retornar este.codigo + 1; }
+};
+
+Entidad elemento = Nuevo(Usuario);
+Mostrar(elemento.valor(), "\n");
+```
+`Nuevo(Clase)` crea una instancia dinámica; los campos heredados comparten el
+mismo objeto y las llamadas virtuales seleccionan la sobrescritura según su
+tipo dinámico. La herencia es simple y `Nuevo` no recibe argumentos.
 
 ### Funciones nativas
 
@@ -522,6 +555,15 @@ Las URL `https://` requieren que el programa se enlace con OpenSSL 1.1.1+
 como se describe en la sección de TLS. Usa `HttpTLS` cuando la URL se obtiene
 dinámicamente; una URL HTTPS literal pasada a `Http` también habilita TLS.
 La prueba mínima está en `tests/http.mx`.
+
+HTTP también está disponible mediante `HttpClient`; `Http`, `HttpTLS`,
+`HttpCuerpo` y `HttpCabeceras` se conservan:
+```mx
+HttpClient cliente;
+Entero estado = cliente.get("https://example.com/");
+Cadena cuerpo = cliente.body();
+Cadena cabeceras = cliente.headers();
+```
 
 ## 🛠️ Mantenimiento
 

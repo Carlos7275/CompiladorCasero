@@ -1,0 +1,11 @@
+Clase Caja {
+    Privado Entero clave;
+
+    Privado Entero secreto() {
+        Retornar 7;
+    }
+};
+
+Caja caja;
+Mostrar(caja.clave);
+Mostrar(caja.secreto());

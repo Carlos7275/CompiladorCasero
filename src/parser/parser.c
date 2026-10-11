@@ -190,6 +190,11 @@ ASTNode *crearNodoAST(enum ASTNodeType type, int renglon, int columna)
     newNode->symbol_scope = NULL;
     newNode->return_type = TIPO_ERROR;
     newNode->tipo_nombre = NULL;
+    newNode->acceso_miembro = ACCESO_PUBLICO;
+    newNode->es_virtual = 0;
+    newNode->es_override = 0;
+    newNode->es_clase = 0;
+    newNode->receptor_nombre = NULL;
 
     return newNode;
 }
@@ -235,6 +240,9 @@ void liberar_ast(ASTNode *node)
 
     free(node->tipo_nombre);
     node->tipo_nombre = NULL;
+
+    free(node->receptor_nombre);
+    node->receptor_nombre = NULL;
 
     free(node->ir_result_name);
     node->ir_result_name = NULL;
@@ -316,6 +324,108 @@ ASTNode *parseSentenciaODeclaracion(void)
     if (token_inicio_sentencia == NULL)
     {
         return NULL;
+    }
+
+    struct nodo *dot_token = token_actual_parser ? token_actual_parser->der : NULL;
+    if (token_inicio_sentencia->TipoToken == ID && dot_token &&
+        strcmp(dot_token->info.Lexema, ".") == 0 && dot_token->der &&
+        dot_token->der->der &&
+        strcmp(dot_token->der->der->info.Lexema, "(") == 0)
+    {
+        node = parseFactor();
+        match(ESPECIAL, ";");
+        return node;
+    }
+
+    if (token_inicio_sentencia->TipoToken == PalRes &&
+        strcmp(token_inicio_sentencia->Lexema, "Clase") == 0)
+    {
+        struct Token *class_token = consumirToken();
+        struct Token *name_token = peekToken();
+        if (!name_token || name_token->TipoToken != ID)
+        {
+            fprintf(stderr, "Error de sintaxis en (R%d, C%d): se esperaba el nombre de la clase.\n",
+                    class_token->Renglon, class_token->Columna);
+            exit(EXIT_FAILURE);
+        }
+        consumirToken();
+
+        ASTNode *class_node = crearNodoAST(AST_DECLARACION_TIPO,
+                                           class_token->Renglon,
+                                           class_token->Columna);
+        class_node->es_clase = 1;
+        class_node->hijo_izq = crearNodoAST(AST_IDENTIFICADOR,
+                                            name_token->Renglon,
+                                            name_token->Columna);
+        class_node->hijo_izq->valor.nombre_id = strdup(name_token->Lexema);
+
+        if (peekToken() && peekToken()->TipoToken == PalRes &&
+            strcmp(peekToken()->Lexema, "Hereda") == 0)
+        {
+            consumirToken();
+            struct Token *parent_token = peekToken();
+            if (!parent_token || parent_token->TipoToken != ID)
+            {
+                fprintf(stderr, "Error de sintaxis en (R%d, C%d): se esperaba el nombre de la clase base.\n",
+                        parent_token ? parent_token->Renglon : class_token->Renglon,
+                        parent_token ? parent_token->Columna : class_token->Columna);
+                exit(EXIT_FAILURE);
+            }
+            consumirToken();
+            class_node->tipo_nombre = strdup(parent_token->Lexema);
+        }
+
+        match(ESPECIAL, "{");
+        ASTNode *field_tail = NULL;
+        ASTNode *method_tail = NULL;
+        while (peekToken() && strcmp(peekToken()->Lexema, "}") != 0)
+        {
+            enum AccesoMiembro access = ACCESO_PRIVADO;
+            int is_virtual = 0;
+            int is_override = 0;
+            int reading_modifiers = 1;
+            while (peekToken() && reading_modifiers)
+            {
+                const char *modifier = peekToken()->Lexema;
+                if (strcmp(modifier, "Publico") == 0)
+                    access = ACCESO_PUBLICO;
+                else if (strcmp(modifier, "Protegido") == 0)
+                    access = ACCESO_PROTEGIDO;
+                else if (strcmp(modifier, "Privado") == 0)
+                    access = ACCESO_PRIVADO;
+                else if (strcmp(modifier, "Virtual") == 0)
+                    is_virtual = 1;
+                else if (strcmp(modifier, "Sobrescribe") == 0)
+                    is_override = 1;
+                else
+                    reading_modifiers = 0;
+                if (reading_modifiers)
+                    consumirToken();
+            }
+
+            ASTNode *member = parseSentenciaODeclaracion();
+            if (!member)
+                continue;
+            member->acceso_miembro = access;
+            member->es_virtual = is_virtual;
+            member->es_override = is_override;
+
+            ASTNode **head = member->type == AST_FUNCION
+                                 ? &class_node->parametros
+                                 : &class_node->hijo_der;
+            ASTNode **tail = member->type == AST_FUNCION
+                                 ? &method_tail
+                                 : &field_tail;
+            if (!*head)
+                *head = member;
+            else
+                (*tail)->siguiente_hermano = member;
+            *tail = member;
+        }
+        match(ESPECIAL, "}");
+        if (peekToken() && strcmp(peekToken()->Lexema, ";") == 0)
+            consumirToken();
+        return class_node;
     }
 
     if (token_inicio_sentencia->TipoToken == PalRes &&
@@ -859,6 +969,12 @@ ASTNode *clonarSubarbol(const ASTNode *node)
     copy->resolved_type = node->resolved_type;
     copy->tipoconstante = node->tipoconstante;
     copy->return_type = node->return_type;
+    copy->acceso_miembro = node->acceso_miembro;
+    copy->es_virtual = node->es_virtual;
+    copy->es_override = node->es_override;
+    copy->es_clase = node->es_clase;
+    if (node->receptor_nombre)
+        copy->receptor_nombre = strdup(node->receptor_nombre);
 
     switch (node->type)
     {
@@ -953,6 +1069,13 @@ ASTNode *parseAsignacion(void)
                 "%s__%s",
                 lhs->valor.nombre_id,
                 field_token->Lexema);
+
+            if (!lhs->tipo_nombre)
+                lhs->tipo_nombre = strdup(lhs->valor.nombre_id);
+            if (!lhs->receptor_nombre)
+                lhs->receptor_nombre = strdup(lhs->valor.nombre_id);
+            free(lhs->ir_result_name);
+            lhs->ir_result_name = strdup(field_token->Lexema);
 
             free(lhs->valor.nombre_id);
             lhs->valor.nombre_id = strdup(member_name);
@@ -1726,6 +1849,49 @@ ASTNode *parseFactor(void)
                 struct Token *field_token = peekToken();
                 match(ID, NULL);
 
+                if (peekToken() && strcmp(peekToken()->Lexema, "(") == 0)
+                {
+                    if (node->type != AST_IDENTIFICADOR)
+                    {
+                        fprintf(stderr,
+                                "Error de sintaxis en (R%d, C%d): el receptor del metodo debe ser un identificador.\n",
+                                field_token->Renglon, field_token->Columna);
+                        exit(EXIT_FAILURE);
+                    }
+
+                    ASTNode *method = crearNodoAST(AST_LLAMADA,
+                                                   field_token->Renglon,
+                                                   field_token->Columna);
+                    method->hijo_izq = crearNodoAST(AST_IDENTIFICADOR,
+                                                    field_token->Renglon,
+                                                    field_token->Columna);
+                    method->hijo_izq->valor.nombre_id = strdup(field_token->Lexema);
+                    method->tipo_nombre = strdup(node->valor.nombre_id);
+                    method->receptor_nombre = strdup(node->valor.nombre_id);
+                    method->parametros = node;
+
+                    match(ESPECIAL, "(");
+                    ASTNode *arg_head = NULL;
+                    ASTNode *arg_tail = NULL;
+                    while (peekToken() && strcmp(peekToken()->Lexema, ")") != 0)
+                    {
+                        ASTNode *arg = parseExpresion();
+                        if (!arg_head)
+                            arg_head = arg;
+                        else
+                            arg_tail->siguiente_hermano = arg;
+                        arg_tail = arg;
+                        if (peekToken() && strcmp(peekToken()->Lexema, ",") == 0)
+                            consumirToken();
+                        else
+                            break;
+                    }
+                    method->hijo_der = arg_head;
+                    match(ESPECIAL, ")");
+                    node = method;
+                    continue;
+                }
+
                 if (node->type != AST_IDENTIFICADOR)
                 {
                     fprintf(stderr,
@@ -1743,6 +1909,13 @@ ASTNode *parseFactor(void)
                     "%s__%s",
                     node->valor.nombre_id,
                     field_token->Lexema);
+
+                if (!node->tipo_nombre)
+                    node->tipo_nombre = strdup(node->valor.nombre_id);
+                if (!node->receptor_nombre)
+                    node->receptor_nombre = strdup(node->valor.nombre_id);
+                free(node->ir_result_name);
+                node->ir_result_name = strdup(field_token->Lexema);
 
                 free(node->valor.nombre_id);
                 node->valor.nombre_id = strdup(member_name);
@@ -1927,7 +2100,17 @@ ASTNode *parseFactor(void)
         break;
 
     case PalRes:
-        if (current_token->tipoDato == BOOL)
+        if (strcmp(current_token->Lexema, "Nuevo") == 0)
+        {
+            consumirToken();
+            match(ESPECIAL, "(");
+            struct Token *class_token = peekToken();
+            match(ID, NULL);
+            node = crearNodoAST(AST_NUEVO, current_token->Renglon, current_token->Columna);
+            node->tipo_nombre = strdup(class_token->Lexema);
+            match(ESPECIAL, ")");
+        }
+        else if (current_token->tipoDato == BOOL)
         {
             node = crearNodoAST(
                 AST_LITERAL_BOOLEANO,

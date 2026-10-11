@@ -39,6 +39,323 @@ static ASTNode *current_inline_function = NULL;
 static unsigned long long current_inline_instance = 0;
 static unsigned long long next_inline_instance = 0;
 static ASTNode *current_recursive_function_codegen = NULL;
+static char *current_method_receiver = NULL;
+
+static void generate_code_for_node(ASTNode *node);
+static char *nombre_local_funcion_actual(const char *nombre, enum TipoDato tipo);
+static char *crear_temp_para_tipo(enum TipoDato tipo);
+static char *new_float_temp(void);
+
+static char *resolver_nombre_receptor(const char *nombre)
+{
+    if (!nombre)
+        return NULL;
+    if (!current_method_receiver)
+        return strdup(nombre);
+    if (strcmp(nombre, "este") == 0)
+        return strdup(current_method_receiver);
+    if (strncmp(nombre, "este__", 6) != 0)
+        return strdup(nombre);
+
+    size_t length = strlen(current_method_receiver) + strlen(nombre + 6) + 3;
+    char *resolved = malloc(length);
+    if (resolved)
+        snprintf(resolved, length, "%s__%s", current_method_receiver, nombre + 6);
+    return resolved;
+}
+
+static ASTNode *buscar_clase_codegen(const char *nombre)
+{
+    for (ASTNode *node = program_root ? program_root->hijo_izq : NULL;
+         node; node = node->siguiente_hermano)
+        if (node->type == AST_DECLARACION_TIPO && node->es_clase && node->hijo_izq &&
+            strcmp(node->hijo_izq->valor.nombre_id, nombre) == 0)
+            return node;
+    return NULL;
+}
+
+static ASTNode *buscar_metodo_codegen(const char *tipo_nombre,
+                                     const char *metodo_nombre,
+                                     int profundidad)
+{
+    if (!tipo_nombre || !metodo_nombre || profundidad > 64)
+        return NULL;
+    ASTNode *type = buscar_clase_codegen(tipo_nombre);
+    if (!type)
+        return NULL;
+    for (ASTNode *method = type->parametros; method; method = method->siguiente_hermano)
+        if (method->type == AST_FUNCION && method->hijo_izq &&
+            strcmp(method->hijo_izq->valor.nombre_id, metodo_nombre) == 0)
+            return method;
+    return type->tipo_nombre
+               ? buscar_metodo_codegen(type->tipo_nombre, metodo_nombre, profundidad + 1)
+               : NULL;
+}
+
+static int tamano_campo_codegen(const ASTNode *field)
+{
+    return field && field->declared_type_info == STRING ? 256 : 8;
+}
+
+static int tamano_clase_codegen(const char *nombre, int profundidad)
+{
+    if (profundidad > 64)
+        return 8;
+    ASTNode *type = buscar_clase_codegen(nombre);
+    if (!type)
+        return 8;
+    int size = type->tipo_nombre
+                   ? tamano_clase_codegen(type->tipo_nombre, profundidad + 1)
+                   : 8;
+    for (ASTNode *field = type->hijo_der; field; field = field->siguiente_hermano)
+        if (field->type == AST_DECLARACION_VAR)
+            size += tamano_campo_codegen(field);
+    return size;
+}
+
+static int id_clase_codegen(const char *nombre)
+{
+    int id = 0;
+    for (ASTNode *node = program_root ? program_root->hijo_izq : NULL;
+         node; node = node->siguiente_hermano)
+        if (node->type == AST_DECLARACION_TIPO && node->es_clase && node->hijo_izq)
+        {
+            if (strcmp(node->hijo_izq->valor.nombre_id, nombre) == 0)
+                return id + 1;
+            ++id;
+        }
+    return 0;
+}
+
+static int offset_campo_codegen(const char *tipo_nombre, const char *campo_nombre,
+                                int profundidad)
+{
+    if (profundidad > 64)
+        return -1;
+    ASTNode *type = buscar_clase_codegen(tipo_nombre);
+    if (!type)
+        return -1;
+    if (type->tipo_nombre)
+    {
+        int inherited_offset = offset_campo_codegen(type->tipo_nombre, campo_nombre,
+                                                    profundidad + 1);
+        if (inherited_offset >= 0)
+            return inherited_offset;
+    }
+
+    int offset = type->tipo_nombre
+                     ? tamano_clase_codegen(type->tipo_nombre, profundidad + 1)
+                     : 8;
+    for (ASTNode *field = type->hijo_der; field; field = field->siguiente_hermano)
+    {
+        if (field->type != AST_DECLARACION_VAR || !field->hijo_izq)
+            continue;
+        if (strcmp(field->hijo_izq->valor.nombre_id, campo_nombre) == 0)
+            return offset;
+        offset += tamano_campo_codegen(field);
+    }
+    return -1;
+}
+
+static ASTNode *buscar_campo_codegen(const char *tipo_nombre, const char *campo_nombre,
+                                    int profundidad)
+{
+    if (profundidad > 64)
+        return NULL;
+    ASTNode *type = buscar_clase_codegen(tipo_nombre);
+    if (!type)
+        return NULL;
+    for (ASTNode *field = type->hijo_der; field; field = field->siguiente_hermano)
+        if (field->type == AST_DECLARACION_VAR && field->hijo_izq &&
+            strcmp(field->hijo_izq->valor.nombre_id, campo_nombre) == 0)
+            return field;
+    return type->tipo_nombre
+               ? buscar_campo_codegen(type->tipo_nombre, campo_nombre, profundidad + 1)
+               : NULL;
+}
+
+static char *crear_especificacion_campo(const char *tipo_nombre, const char *campo_nombre)
+{
+    size_t length = strlen(tipo_nombre) + strlen(campo_nombre) + 2;
+    char *specification = malloc(length);
+    if (specification)
+        snprintf(specification, length, "%s|%s", tipo_nombre, campo_nombre);
+    return specification;
+}
+
+static void separar_especificacion_campo(const char *specification,
+                                         char *tipo_nombre, size_t type_capacity,
+                                         char *campo_nombre, size_t field_capacity)
+{
+    const char *separator = specification ? strchr(specification, '|') : NULL;
+    if (!separator)
+    {
+        tipo_nombre[0] = '\0';
+        campo_nombre[0] = '\0';
+        return;
+    }
+    size_t type_length = (size_t)(separator - specification);
+    if (type_length >= type_capacity)
+        type_length = type_capacity - 1;
+    memcpy(tipo_nombre, specification, type_length);
+    tipo_nombre[type_length] = '\0';
+    snprintf(campo_nombre, field_capacity, "%s", separator + 1);
+}
+
+typedef struct
+{
+    char *valor;
+    enum TipoDato tipo;
+} ArgumentoGenerado;
+
+static char *generar_llamada_inline(ASTNode *fn, const char *method_receiver,
+                                   const ArgumentoGenerado *arguments,
+                                   size_t argument_count)
+{
+    unsigned long long previous_inline_instance = current_inline_instance;
+    ASTNode *previous_inline_function = current_inline_function;
+    current_inline_instance = ++next_inline_instance;
+    current_inline_function = fn;
+
+    ASTNode *parameter = fn->parametros;
+    for (size_t i = 0; i < argument_count && parameter; ++i, parameter = parameter->siguiente_hermano)
+    {
+        char *param_name = nombre_local_funcion_actual(
+            parameter->hijo_izq->valor.nombre_id, arguments[i].tipo);
+        emit_quad(IR_ASSIGN, arguments[i].valor, NULL, param_name);
+        free(param_name);
+    }
+
+    char *previous_return_value = current_return_value;
+    int previous_return_value_owned = current_return_value_owned;
+    char *previous_return_storage = current_return_storage;
+    char *previous_function_end_label = current_function_end_label;
+    enum TipoDato previous_return_type = current_return_type;
+    char *previous_method_receiver = current_method_receiver;
+
+    current_return_value = NULL;
+    current_return_value_owned = 0;
+    current_return_type = fn->return_type;
+    current_return_storage = nombre_local_funcion_actual("return", fn->return_type);
+    current_function_end_label = new_label();
+    char *function_end_label = current_function_end_label;
+    if (method_receiver)
+        current_method_receiver = (char *)method_receiver;
+
+    generate_code_for_node(fn->hijo_der);
+    current_method_receiver = previous_method_receiver;
+    emit_quad(IR_LABEL, NULL, NULL, current_function_end_label);
+
+    char *function_return_value = current_return_value;
+    int function_return_value_owned = current_return_value_owned;
+    char *function_return_storage = current_return_storage;
+    current_return_value = previous_return_value;
+    current_return_value_owned = previous_return_value_owned;
+    current_return_storage = previous_return_storage;
+    current_function_end_label = previous_function_end_label;
+    current_return_type = previous_return_type;
+    current_inline_function = previous_inline_function;
+    current_inline_instance = previous_inline_instance;
+    free(function_end_label);
+
+    char *result = NULL;
+    if (function_return_value)
+    {
+        if (fn->return_type == STRING)
+            result = strdup(function_return_value);
+        else
+        {
+            result = fn->return_type == FLOAT ? new_float_temp() : new_temp();
+            emit_quad(IR_ASSIGN, function_return_storage, NULL, result);
+        }
+    }
+    else
+        result = strdup("0");
+
+    if (function_return_value_owned)
+        free(function_return_value);
+    free(function_return_storage);
+    return result;
+}
+
+static int es_subtipo_codegen(const char *tipo, const char *base, int profundidad)
+{
+    if (!tipo || !base || profundidad > 64)
+        return 0;
+    if (strcmp(tipo, base) == 0)
+        return 1;
+    ASTNode *class_node = buscar_clase_codegen(tipo);
+    return class_node && class_node->tipo_nombre
+               ? es_subtipo_codegen(class_node->tipo_nombre, base, profundidad + 1)
+               : 0;
+}
+
+static char *generar_despacho_virtual(const char *static_type, ASTNode *static_method,
+                                      const char *receiver,
+                                      const ArgumentoGenerado *arguments,
+                                      size_t argument_count)
+{
+    ASTNode *targets[128];
+    char *labels[128];
+    size_t target_count = 0;
+    char *result = crear_temp_para_tipo(static_method->return_type);
+    char *fallback_label = new_label();
+    char *end_label = new_label();
+
+    for (ASTNode *class_node = program_root ? program_root->hijo_izq : NULL;
+         class_node; class_node = class_node->siguiente_hermano)
+    {
+        if (class_node->type != AST_DECLARACION_TIPO || !class_node->es_clase ||
+            !class_node->hijo_izq ||
+            !es_subtipo_codegen(class_node->hijo_izq->valor.nombre_id, static_type, 0))
+            continue;
+
+        ASTNode *implementation = buscar_metodo_codegen(
+            class_node->hijo_izq->valor.nombre_id,
+            static_method->hijo_izq->valor.nombre_id, 0);
+        if (!implementation || implementation == static_method)
+            continue;
+
+        size_t target_index = 0;
+        while (target_index < target_count && targets[target_index] != implementation)
+            ++target_index;
+        if (target_index == target_count)
+        {
+            if (target_count >= sizeof(targets) / sizeof(targets[0]))
+                continue;
+            targets[target_count] = implementation;
+            labels[target_count] = new_label();
+            target_index = target_count++;
+        }
+
+        char class_id[32];
+        snprintf(class_id, sizeof(class_id), "%d",
+                 id_clase_codegen(class_node->hijo_izq->valor.nombre_id));
+        emit_quad(IR_IF_OBJECT_TYPE_GOTO, receiver, class_id, labels[target_index]);
+    }
+
+    emit_quad(IR_GOTO, NULL, NULL, fallback_label);
+    for (size_t i = 0; i < target_count; ++i)
+    {
+        emit_quad(IR_LABEL, NULL, NULL, labels[i]);
+        char *branch_result = generar_llamada_inline(
+            targets[i], receiver, arguments, argument_count);
+        emit_quad(IR_ASSIGN, branch_result, NULL, result);
+        emit_quad(IR_GOTO, NULL, NULL, end_label);
+        free(branch_result);
+        free(labels[i]);
+    }
+
+    emit_quad(IR_LABEL, NULL, NULL, fallback_label);
+    char *fallback_result = generar_llamada_inline(
+        static_method, receiver, arguments, argument_count);
+    emit_quad(IR_ASSIGN, fallback_result, NULL, result);
+    emit_quad(IR_LABEL, NULL, NULL, end_label);
+    free(fallback_result);
+    free(fallback_label);
+    free(end_label);
+    return result;
+}
 
 static EntradaSimbolo *buscar_simbolo_en_subarbol(TablaSimbolos *scope,
                                                   const char *name)
@@ -341,6 +658,16 @@ static char *generate_code_for_expression(ASTNode *expr_node)
 
     switch (expr_node->type)
     {
+    case AST_NUEVO:
+    {
+        char size_text[32];
+        snprintf(size_text, sizeof(size_text), "%d",
+                 tamano_clase_codegen(expr_node->tipo_nombre, 0));
+        result_name = new_temp();
+        emit_quad(IR_ALLOC_OBJECT, expr_node->tipo_nombre, size_text, result_name);
+        break;
+    }
+
     case AST_LITERAL_ENTERO:
         snprintf(buffer, sizeof(buffer), "%" PRId64, expr_node->valor.valor_entero);
         result_name = strdup(buffer);
@@ -364,6 +691,95 @@ static char *generate_code_for_expression(ASTNode *expr_node)
     case AST_LLAMADA:
     {
         const char *native = expr_node->hijo_izq->valor.nombre_id;
+        const char *method_marker = expr_node->ir_result_name;
+        if (method_marker && strncmp(method_marker, "__mxmethod__", 12) == 0)
+        {
+            const char *description = method_marker + 12;
+            const char *separator = strstr(description, "__");
+            if (!separator)
+            {
+                result_name = strdup("0");
+                break;
+            }
+
+            char mode[32];
+            char native_name[64];
+            size_t mode_length = (size_t)(separator - description);
+            if (mode_length >= sizeof(mode) || strlen(separator + 2) >= sizeof(native_name))
+            {
+                result_name = strdup("0");
+                break;
+            }
+            memcpy(mode, description, mode_length);
+            mode[mode_length] = '\0';
+            snprintf(native_name, sizeof(native_name), "%s", separator + 2);
+
+            char *values[5] = {0};
+            size_t value_count = 0;
+            ASTNode *argument = expr_node->hijo_der;
+            if (strcmp(mode, "receiver") == 0 && expr_node->parametros)
+                values[value_count++] = generate_code_for_expression(expr_node->parametros);
+            else if (strcmp(mode, "http_request") == 0 || strcmp(mode, "http_tls") == 0)
+            {
+                ASTNode *method_argument = argument;
+                ASTNode *url_argument = method_argument ? method_argument->siguiente_hermano : NULL;
+                values[value_count++] = url_argument ? generate_code_for_expression(url_argument) : strdup("\"\"");
+                values[value_count++] = method_argument ? generate_code_for_expression(method_argument) : strdup("\"GET\"");
+                argument = url_argument ? url_argument->siguiente_hermano : NULL;
+            }
+            else if (strcmp(mode, "http_get") == 0 || strcmp(mode, "http_delete") == 0)
+            {
+                values[value_count++] = argument ? generate_code_for_expression(argument) : strdup("\"\"");
+                argument = argument ? argument->siguiente_hermano : NULL;
+                values[value_count++] = strdup(strcmp(mode, "http_get") == 0 ? "\"GET\"" : "\"DELETE\"");
+                values[value_count++] = strdup("\"\"");
+                values[value_count++] = strdup("\"\"");
+            }
+            else if (strcmp(mode, "http_post") == 0 || strcmp(mode, "http_put") == 0)
+            {
+                values[value_count++] = argument ? generate_code_for_expression(argument) : strdup("\"\"");
+                argument = argument ? argument->siguiente_hermano : NULL;
+                values[value_count++] = strdup(strcmp(mode, "http_post") == 0 ? "\"POST\"" : "\"PUT\"");
+                values[value_count++] = strdup("\"\"");
+                values[value_count++] = argument ? generate_code_for_expression(argument) : strdup("\"\"");
+                argument = argument ? argument->siguiente_hermano : NULL;
+            }
+
+            while (argument && value_count < sizeof(values) / sizeof(values[0]))
+            {
+                values[value_count++] = generate_code_for_expression(argument);
+                argument = argument->siguiente_hermano;
+            }
+
+            size_t packed_capacity = 1;
+            for (size_t index = 0; index < value_count; ++index)
+                packed_capacity += strlen(values[index]) + 1;
+            char *packed_args = calloc(packed_capacity, 1);
+            if (!packed_args)
+            {
+                for (size_t index = 0; index < value_count; ++index)
+                    free(values[index]);
+                result_name = strdup("0");
+                break;
+            }
+            for (size_t index = 0; index < value_count; ++index)
+            {
+                if (index)
+                    strcat(packed_args, "|");
+                strcat(packed_args, values[index]);
+                free(values[index]);
+            }
+
+            if (expr_node->resolved_type == FLOAT)
+                result_name = new_float_temp();
+            else if (expr_node->resolved_type == STRING)
+                result_name = new_string_temp();
+            else
+                result_name = new_temp();
+            emit_quad(IR_NATIVE_CALL, native_name, packed_args, result_name);
+            free(packed_args);
+            break;
+        }
         if (strcmp(native, "Entorno") == 0)
         {
             char *clave = expr_node->hijo_der
@@ -414,7 +830,9 @@ static char *generate_code_for_expression(ASTNode *expr_node)
             break;
         }
         ASTNode *fn = NULL, *c = program_root ? program_root->hijo_izq : NULL;
-        while (c)
+        if (expr_node->tipo_nombre && expr_node->ir_result_name)
+            fn = buscar_metodo_codegen(expr_node->ir_result_name, native, 0);
+        while (!fn && c)
         {
             if (c->type == AST_FUNCION && c->hijo_izq &&
                 strcmp(c->hijo_izq->valor.nombre_id, expr_node->hijo_izq->valor.nombre_id) == 0)
@@ -459,98 +877,37 @@ static char *generate_code_for_expression(ASTNode *expr_node)
             break;
         }
 
-        ASTNode *p = fn->parametros, *a = expr_node->hijo_der;
-
-        /*
-         * Los argumentos deben generarse en el contexto del caller.
-         * Si cambiamos current_inline_function antes de evaluarlos,
-         * argumentos como duplicar(x) dentro de combinar() dejan de
-         * resolver x en combinar y terminan como un identificador global.
-         */
-        typedef struct
-        {
-            char *valor;
-            enum TipoDato tipo;
-        } ArgumentoGenerado;
+        char *method_receiver = NULL;
+        if (expr_node->tipo_nombre && expr_node->parametros)
+            method_receiver = generate_code_for_expression(expr_node->parametros);
 
         ArgumentoGenerado argumentos[64];
         size_t cantidad_argumentos = 0;
-
-        while (a && cantidad_argumentos < 64)
+        ASTNode *argument = expr_node->hijo_der;
+        ASTNode *parameter = fn->parametros;
+        while (argument && cantidad_argumentos < 64)
         {
-            argumentos[cantidad_argumentos].valor =
-                generate_code_for_expression(a);
-            argumentos[cantidad_argumentos].tipo =
-                p ? tipo_nodo(p->hijo_izq) : TIPO_ERROR;
+            argumentos[cantidad_argumentos].valor = generate_code_for_expression(argument);
+            argumentos[cantidad_argumentos].tipo = parameter
+                                                        ? tipo_nodo(parameter->hijo_izq)
+                                                        : TIPO_ERROR;
             cantidad_argumentos++;
-            a = a->siguiente_hermano;
-            if (p)
-                p = p->siguiente_hermano;
+            argument = argument->siguiente_hermano;
+            if (parameter)
+                parameter = parameter->siguiente_hermano;
         }
 
-        unsigned long long previous_inline_instance = current_inline_instance;
-        ASTNode *previous_inline_function = current_inline_function;
-        current_inline_instance = ++next_inline_instance;
-        current_inline_function = fn;
-
-        p = fn->parametros;
-        for (size_t i = 0; i < cantidad_argumentos && p; ++i, p = p->siguiente_hermano)
-        {
-            char *param_name =
-                nombre_local_funcion_actual(p->hijo_izq->valor.nombre_id,
-                                            argumentos[i].tipo);
-            emit_quad(IR_ASSIGN, argumentos[i].valor, NULL, param_name);
-            free(param_name);
-            free(argumentos[i].valor);
-        }
-
-        char *previous_return_value = current_return_value;
-        int previous_return_value_owned = current_return_value_owned;
-        char *previous_return_storage = current_return_storage;
-        char *previous_function_end_label = current_function_end_label;
-
-        current_return_value = NULL;
-        current_return_value_owned = 0;
-
-        enum TipoDato previous_return_type = current_return_type;
-        current_return_type = fn->return_type;
-        current_return_storage = nombre_local_funcion_actual("return", fn->return_type);
-        current_function_end_label = new_label();
-        char *function_end_label = current_function_end_label;
-
-        generate_code_for_node(fn->hijo_der);
-        emit_quad(IR_LABEL, NULL, NULL, current_function_end_label);
-
-        char *function_return_value = current_return_value;
-        int function_return_value_owned = current_return_value_owned;
-
-        char *function_return_storage = current_return_storage;
-
-        current_return_value = previous_return_value;
-        current_return_value_owned = previous_return_value_owned;
-        current_return_storage = previous_return_storage;
-        current_function_end_label = previous_function_end_label;
-        current_return_type = previous_return_type;
-        current_inline_function = previous_inline_function;
-        current_inline_instance = previous_inline_instance;
-
-        free(function_end_label);
-        if (function_return_value)
-        {
-            if (fn->return_type == STRING)
-                result_name = strdup(function_return_value);
-            else
-            {
-                result_name = (fn->return_type == FLOAT) ? new_float_temp() : new_temp();
-                emit_quad(IR_ASSIGN, function_return_storage, NULL, result_name);
-            }
-        }
+        if (method_receiver && fn->es_virtual)
+            result_name = generar_despacho_virtual(expr_node->tipo_nombre, fn,
+                                                   method_receiver, argumentos,
+                                                   cantidad_argumentos);
         else
-            result_name = strdup("0");
+            result_name = generar_llamada_inline(fn, method_receiver, argumentos,
+                                                cantidad_argumentos);
 
-        if (function_return_value_owned)
-            free(function_return_value);
-        free(function_return_storage);
+        for (size_t i = 0; i < cantidad_argumentos; ++i)
+            free(argumentos[i].valor);
+        free(method_receiver);
         break;
     }
     case AST_ACCESO_ARRAY:
@@ -587,6 +944,29 @@ static char *generate_code_for_expression(ASTNode *expr_node)
 
     case AST_IDENTIFICADOR:
     {
+        if (expr_node->receptor_nombre && expr_node->ir_result_name &&
+            expr_node->tipo_nombre)
+        {
+            char *receiver = resolver_nombre_receptor(expr_node->receptor_nombre);
+            char *field_spec = crear_especificacion_campo(expr_node->tipo_nombre,
+                                                          expr_node->ir_result_name);
+            ASTNode *field = buscar_campo_codegen(expr_node->tipo_nombre,
+                                                  expr_node->ir_result_name, 0);
+            result_name = crear_temp_para_tipo(field ? field->declared_type_info : INT);
+            emit_quad(IR_LOAD_FIELD, receiver, field_spec, result_name);
+            free(receiver);
+            free(field_spec);
+            break;
+        }
+
+        if (current_method_receiver &&
+            (strcmp(expr_node->valor.nombre_id, "este") == 0 ||
+             strncmp(expr_node->valor.nombre_id, "este__", 6) == 0))
+        {
+            result_name = resolver_nombre_receptor(expr_node->valor.nombre_id);
+            break;
+        }
+
         enum TipoDato local_type = TIPO_ERROR;
         if (es_local_funcion_actual(expr_node->valor.nombre_id, &local_type))
         {
@@ -807,7 +1187,25 @@ static void generate_code_for_statement(ASTNode *stmt_node)
             enum TipoDato local_type = TIPO_ERROR;
             char *target_name = NULL;
 
-            if (es_local_funcion_actual(var_name, &local_type))
+            if (stmt_node->hijo_izq->receptor_nombre &&
+                stmt_node->hijo_izq->ir_result_name &&
+                stmt_node->hijo_izq->tipo_nombre)
+            {
+                char *receiver = resolver_nombre_receptor(
+                    stmt_node->hijo_izq->receptor_nombre);
+                char *field_spec = crear_especificacion_campo(
+                    stmt_node->hijo_izq->tipo_nombre,
+                    stmt_node->hijo_izq->ir_result_name);
+                emit_quad(IR_STORE_FIELD, receiver, field_spec, expr_result);
+                free(receiver);
+                free(field_spec);
+                free(expr_result);
+                break;
+            }
+
+            if (current_method_receiver && strncmp(var_name, "este__", 6) == 0)
+                target_name = resolver_nombre_receptor(var_name);
+            else if (es_local_funcion_actual(var_name, &local_type))
                 target_name = nombre_local_funcion_actual(var_name, local_type);
             else
                 target_name = strdup(var_name);
@@ -1594,6 +1992,7 @@ static void eliminar_labels_no_referenciados(void)
             if (i == j) continue;
             Quadruple *r = &ir_code[j];
             if (((r->op == IR_GOTO || r->op == IR_IF_FALSE_GOTO ||
+                r->op == IR_IF_OBJECT_TYPE_GOTO ||
                   r->op == IR_THROW) &&
                  r->result && strcmp(r->result, q->result) == 0) ||
                 (r->op == IR_DIV_ZERO_CHECK && r->arg2 &&
@@ -1982,6 +2381,153 @@ static void emitir_guardado_float(FILE *f, const char *op, const char *reg)
     fprintf(f, "    movsd %s, %s\n", mem_ref(op), reg);
 }
 
+static int obtener_desplazamiento_potencia_de_dos(const char *operando, unsigned *desplazamiento)
+{
+    if (!operando || !*operando)
+        return 0;
+
+    for (const char *cursor = operando; *cursor; ++cursor)
+        if (!isdigit((unsigned char)*cursor))
+            return 0;
+
+    errno = 0;
+    char *end = NULL;
+    unsigned long long valor = strtoull(operando, &end, 10);
+    if (errno || !end || *end || valor == 0 || valor > INT64_MAX ||
+        (valor & (valor - 1)) != 0)
+        return 0;
+
+    unsigned bits = 0;
+    while (valor > 1)
+    {
+        valor >>= 1;
+        ++bits;
+    }
+    *desplazamiento = bits;
+    return 1;
+}
+
+static void emitir_comentario_ir(FILE *f, const Quadruple *q)
+{
+    const char *arg1 = q->arg1 ? q->arg1 : "?";
+    const char *arg2 = q->arg2 ? q->arg2 : "?";
+    const char *result = q->result ? q->result : "?";
+
+    fprintf(f, "\n    ; ");
+    switch (q->op)
+    {
+    case IR_ASSIGN:
+        fprintf(f, "%s = %s", result, arg1);
+        break;
+    case IR_ADD:
+        fprintf(f, "%s = %s + %s", result, arg1, arg2);
+        break;
+    case IR_SUB:
+        fprintf(f, "%s = %s - %s", result, arg1, arg2);
+        break;
+    case IR_MUL:
+        fprintf(f, "%s = %s * %s", result, arg1, arg2);
+        break;
+    case IR_DIV:
+        fprintf(f, "%s = %s / %s", result, arg1, arg2);
+        break;
+    case IR_MOD:
+        fprintf(f, "%s = %s %% %s", result, arg1, arg2);
+        break;
+    case IR_BIT_AND:
+        fprintf(f, "%s = %s & %s", result, arg1, arg2);
+        break;
+    case IR_BIT_OR:
+        fprintf(f, "%s = %s | %s", result, arg1, arg2);
+        break;
+    case IR_BIT_XOR:
+        fprintf(f, "%s = %s ^ %s", result, arg1, arg2);
+        break;
+    case IR_SHIFT_LEFT:
+        fprintf(f, "%s = %s << %s", result, arg1, arg2);
+        break;
+    case IR_SHIFT_RIGHT:
+        fprintf(f, "%s = %s >> %s", result, arg1, arg2);
+        break;
+    case IR_NEG:
+        fprintf(f, "%s = -%s", result, arg1);
+        break;
+    case IR_BIT_NOT:
+        fprintf(f, "%s = ~%s", result, arg1);
+        break;
+    case IR_NOT:
+        fprintf(f, "%s = !%s", result, arg1);
+        break;
+    case IR_LT:
+        fprintf(f, "%s = %s < %s", result, arg1, arg2);
+        break;
+    case IR_GT:
+        fprintf(f, "%s = %s > %s", result, arg1, arg2);
+        break;
+    case IR_LE:
+        fprintf(f, "%s = %s <= %s", result, arg1, arg2);
+        break;
+    case IR_GE:
+        fprintf(f, "%s = %s >= %s", result, arg1, arg2);
+        break;
+    case IR_EQ:
+        fprintf(f, "%s = %s == %s", result, arg1, arg2);
+        break;
+    case IR_NE:
+        fprintf(f, "%s = %s != %s", result, arg1, arg2);
+        break;
+    case IR_AND:
+        fprintf(f, "%s = %s && %s", result, arg1, arg2);
+        break;
+    case IR_OR:
+        fprintf(f, "%s = %s || %s", result, arg1, arg2);
+        break;
+    case IR_LABEL:
+        fprintf(f, "etiqueta de control %s", result);
+        break;
+    case IR_GOTO:
+        fprintf(f, "saltar a %s", result);
+        break;
+    case IR_IF_FALSE_GOTO:
+        fprintf(f, "si !%s, saltar a %s", arg1, result);
+        break;
+    case IR_LOAD_ARRAY:
+        fprintf(f, "%s = %s[%s]", result, arg1, arg2);
+        break;
+    case IR_STORE_ARRAY:
+        fprintf(f, "%s[%s] = %s", arg1, arg2, result);
+        break;
+    case IR_PRINT:
+        fprintf(f, "mostrar %s", arg1);
+        break;
+    case IR_READ:
+        fprintf(f, "leer %s", result);
+        break;
+    case IR_NATIVE_CALL:
+        fprintf(f, "%s = llamada nativa %s(%s)", result, arg1, arg2);
+        break;
+    case IR_CALL:
+        fprintf(f, "%s = llamar %s(%s)", result, arg1, arg2);
+        break;
+    case IR_THROW:
+        fprintf(f, "lanzar %s", arg1);
+        break;
+    case IR_DIV_ZERO_CHECK:
+        fprintf(f, "verificar division entre cero en %s", arg1);
+        break;
+    case IR_DEBUG_STEP:
+        fprintf(f, "paso del depurador");
+        break;
+    case IR_HALT:
+        fprintf(f, "fin del programa");
+        break;
+    default:
+        fprintf(f, "operacion IR %d", q->op);
+        break;
+    }
+    fputc('\n', f);
+}
+
 static void emitir_parametros_recursivos(FILE *f, ASTNode *fn)
 {
     int index = 0;
@@ -1998,7 +2544,7 @@ static void emitir_parametros_recursivos(FILE *f, ASTNode *fn)
 #if defined(_WIN32)
         fprintf(f, "    mov rax, [rbp+%d]\n    mov [rbp-%d], rax\n", 48 + index*8, slot->offset);
 #else
-        fprintf(f, "    mov rax, [rbp+%d]\n    mov [rbp-%d], rax\n", 16 + index*8, slot->offset);
+    fprintf(f, "    mov rax, [rbp+%d]\n    mov [rbp-%d], rax\n", 16 + index*8, slot->offset);
 #endif
         free(local);
     }
@@ -2039,6 +2585,7 @@ void generate_asm(FILE *f)
     int uses_file_io = 0;
     int uses_debugger = 0;
     int uses_exceptions = 0;
+    int uses_objects = 0;
     preparar_simbolos_flotantes();
     preparar_layouts_recursivos();
     const char *data_section = "section .data\n";
@@ -2054,11 +2601,13 @@ void generate_asm(FILE *f)
         "";
 #endif
 
-    fprintf(f, "BITS 64\n");
+    fprintf(f, "BITS 64\n\n");
 
     for (int i = 0; i < ir_current_size; i++)
     {
         Quadruple *q = &ir_code[i];
+        if (q->op == IR_ALLOC_OBJECT)
+            uses_objects = 1;
         if (q->op == IR_DEBUG_STEP)
             uses_debugger = 1;
         if (q->op == IR_THROW || q->op == IR_DIV_ZERO_CHECK ||
@@ -2170,7 +2719,7 @@ void generate_asm(FILE *f)
     main_sym = "_main";
 #endif
 
-    // Sección .data con formatos
+    fprintf(f, "; Datos inicializados: formatos y literales\n");
     fprintf(f, "%s", data_section);
     if (uses_exceptions)
         fprintf(f, "__mx_div_zero_message db \"Excepcion: division entre cero\", 0\n");
@@ -2208,6 +2757,12 @@ void generate_asm(FILE *f)
             print_asm_string_literal(f, strip_quotes(asm_symbol(q->arg2)));
             fprintf(f, ", 0\n");
         }
+        if (q->op == IR_STORE_FIELD && is_string_literal(asm_symbol(q->result)))
+        {
+            fprintf(f, "str_%d_3 db ", i);
+            print_asm_string_literal(f, strip_quotes(asm_symbol(q->result)));
+            fprintf(f, ", 0\n");
+        }
         if (q->op == IR_NATIVE_CALL && asm_symbol(q->arg2))
         {
             char args[512];
@@ -2228,7 +2783,7 @@ void generate_asm(FILE *f)
         }
     }
 
-    // Variables en .bss
+    fprintf(f, "\n; Variables globales y temporales\n");
     fprintf(f, "%s", bss_section);
     if (uses_decimales)
     {
@@ -2239,7 +2794,8 @@ void generate_asm(FILE *f)
     {
         Quadruple *q = &ir_code[i];
         const char *args[] = {
-            (q->op == IR_NATIVE_CALL || q->op == IR_CALL || q->op == IR_FUNCTION_BEGIN || q->op == IR_FUNCTION_END) ? NULL : asm_symbol(q->arg1),
+            (q->op == IR_NATIVE_CALL || q->op == IR_CALL || q->op == IR_ALLOC_OBJECT ||
+             q->op == IR_FUNCTION_BEGIN || q->op == IR_FUNCTION_END) ? NULL : asm_symbol(q->arg1),
             asm_symbol(q->arg2), asm_symbol(q->result)};
         for (int j = 0; j < 3; j++)
         {
@@ -2258,7 +2814,8 @@ void generate_asm(FILE *f)
                     }
                     snprintf(declared_vars[declared_vars_count++], sizeof(declared_vars[0]), "%s", var);
                     EntradaSimbolo *entry = buscar_simbolo_en_subarbol(global_symbol_table_ref, var);
-                    if (entry != NULL && entry->tipo == STRING)
+                    if ((entry != NULL && entry->tipo == STRING) ||
+                        es_temporal_prefijado(var, 's'))
                         fprintf(f, "    %s resb 256\n", var);
                     else
                         fprintf(f, "    %s resb 8\n", var);
@@ -2283,7 +2840,8 @@ void generate_asm(FILE *f)
                     }
                     snprintf(declared_vars[declared_vars_count++], sizeof(declared_vars[0]), "%s", asm_arg);
                     EntradaSimbolo *entry = buscar_simbolo_en_subarbol(global_symbol_table_ref, arg);
-                    if (entry && entry->tipo == STRING)
+                    if ((entry && entry->tipo == STRING) ||
+                        es_temporal_prefijado(asm_arg, 's'))
                         fprintf(f, "    %s resb 256\n", asm_arg);
                     else
                         fprintf(f, "    %s resb 8\n", asm_arg);
@@ -2293,7 +2851,7 @@ void generate_asm(FILE *f)
         }
     }
 
-    // Código principal
+    fprintf(f, "\n; Codigo ejecutable\n");
     fprintf(f, "%s", text_section);
     fprintf(f, "global %s\n", main_sym);
     if (uses_print)
@@ -2301,6 +2859,8 @@ void generate_asm(FILE *f)
     if (uses_read)
         fprintf(f, "extern %s\n", scanf_sym);
     {
+        if (uses_objects)
+            fprintf(f, "extern %scalloc\n", runtime_prefix);
         const char *native_prefix =
 #if defined(__APPLE__)
             "_";
@@ -2386,7 +2946,7 @@ void generate_asm(FILE *f)
                     runtime_prefix, runtime_prefix, runtime_prefix, runtime_prefix);
     }
 
-    fprintf(f, "%s:\n", main_sym);
+    fprintf(f, "\n; Punto de entrada del programa\n%s:\n", main_sym);
     fprintf(f, "    push rbp\n");
     fprintf(f, "    mov rbp, rsp\n");
     if (uses_decimales)
@@ -2402,6 +2962,7 @@ void generate_asm(FILE *f)
     for (int i = 0; i < function_ir_start; i++)
     {
         Quadruple *q = &ir_code[i];
+        emitir_comentario_ir(f, q);
 
         if (q->op == IR_LABEL)
         {
@@ -2411,6 +2972,74 @@ void generate_asm(FILE *f)
 
         switch (q->op)
         {
+        case IR_IF_OBJECT_TYPE_GOTO:
+            if (is_number(asm_symbol(q->arg1)))
+                fprintf(f, "    mov rax, %s\n", asm_symbol(q->arg1));
+            else
+                fprintf(f, "    mov rax, [rel %s]\n", asm_symbol(q->arg1));
+            fprintf(f, "    cmp qword [rax], %s\n    je %s\n",
+                    asm_symbol(q->arg2), asm_symbol(q->result));
+            break;
+
+        case IR_ALLOC_OBJECT:
+        {
+            int class_id = id_clase_codegen(q->arg1);
+#if defined(_WIN32)
+            fprintf(f, "    mov rcx, 1\n    mov rdx, %s\n", asm_symbol(q->arg2));
+#else
+            fprintf(f, "    mov rdi, 1\n    mov rsi, %s\n", asm_symbol(q->arg2));
+#endif
+            fprintf(f, "    call %scalloc\n    mov qword [rax], %d\n    mov [rel %s], rax\n",
+                    runtime_prefix, class_id, asm_symbol(q->result));
+            break;
+        }
+        case IR_LOAD_FIELD:
+        case IR_STORE_FIELD:
+        {
+            char class_name[128];
+            char field_name[128];
+            separar_especificacion_campo(q->arg2, class_name, sizeof(class_name),
+                                         field_name, sizeof(field_name));
+            int offset = offset_campo_codegen(class_name, field_name, 0);
+            ASTNode *field = buscar_campo_codegen(class_name, field_name, 0);
+            if (offset < 0 || !field)
+            {
+                fprintf(stderr, "Error interno: campo no encontrado en layout de objeto: %s.%s\n",
+                        class_name, field_name);
+                exit(EXIT_FAILURE);
+            }
+
+            if (is_number(q->arg1))
+                fprintf(f, "    mov rbx, %s\n", asm_symbol(q->arg1));
+            else
+                fprintf(f, "    mov rbx, [rel %s]\n", asm_symbol(q->arg1));
+
+            if (q->op == IR_LOAD_FIELD)
+            {
+                if (field->declared_type_info == STRING)
+                    fprintf(f, "    lea rax, [rbx+%d]\n    mov [rel %s], rax\n",
+                            offset, asm_symbol(q->result));
+                else
+                    fprintf(f, "    mov rax, [rbx+%d]\n    mov [rel %s], rax\n",
+                            offset, asm_symbol(q->result));
+            }
+            else if (field->declared_type_info == STRING)
+            {
+                if (is_string_literal(asm_symbol(q->result)))
+                    fprintf(f, "    lea rsi, [rel str_%d_3]\n", i);
+                else if (es_temporal_prefijado(asm_symbol(q->result), 's'))
+                    fprintf(f, "    mov rsi, [rel %s]\n", asm_symbol(q->result));
+                else
+                    fprintf(f, "    lea rsi, [rel %s]\n", asm_symbol(q->result));
+                fprintf(f, "    lea rdi, [rbx+%d]\n    mov ecx, 256\n    rep movsb\n", offset);
+            }
+            else if (is_number(asm_symbol(q->result)))
+                fprintf(f, "    mov qword [rbx+%d], %s\n", offset, asm_symbol(q->result));
+            else
+                fprintf(f, "    mov rcx, [rel %s]\n    mov [rbx+%d], rcx\n",
+                        asm_symbol(q->result), offset);
+            break;
+        }
         case IR_LOAD_ARRAY:
         {
             if (is_number(asm_symbol(q->arg2))) fprintf(f, "    mov rax, %s\n", asm_symbol(q->arg2));
@@ -2566,7 +3195,16 @@ void generate_asm(FILE *f)
                     fprintf(f, "    mov rax, [rel %s]\n", asm_symbol(q->arg1));
 
                 if (es_literal(asm_symbol(q->arg2)))
-                    fprintf(f, "    %s rax, %s\n", op, asm_symbol(q->arg2));
+                {
+                    unsigned desplazamiento;
+                    if (q->op == IR_MUL && obtener_desplazamiento_potencia_de_dos(asm_symbol(q->arg2), &desplazamiento))
+                    {
+                        if (desplazamiento > 0)
+                            fprintf(f, "    shl rax, %u\n", desplazamiento);
+                    }
+                    else
+                        fprintf(f, "    %s rax, %s\n", op, asm_symbol(q->arg2));
+                }
                 else
                     fprintf(f, "    %s rax, [rel %s]\n", op, asm_symbol(q->arg2));
 
@@ -3576,7 +4214,8 @@ void generate_asm(FILE *f)
         }
 
         current_recursive_function_codegen = fn_ast;
-        fprintf(f, "\n%s:\n    push rbp\n    mov rbp, rsp\n", asm_symbol(ir_code[i].arg1));
+        fprintf(f, "\n; Funcion %s\n%s:\n    push rbp\n    mov rbp, rsp\n",
+            ir_code[i].arg1, asm_symbol(ir_code[i].arg1));
 #if defined(_WIN32)
         fprintf(f, "    sub rsp, %d\n", layout->frame_size + 32);
 #else
@@ -3588,6 +4227,7 @@ void generate_asm(FILE *f)
         for (; j < ir_current_size && ir_code[j].op != IR_FUNCTION_END; ++j)
         {
             Quadruple *qf = &ir_code[j];
+            emitir_comentario_ir(f, qf);
             if (qf->op == IR_LABEL) { fprintf(f, "%s:\n", asm_symbol(qf->result)); continue; }
             switch (qf->op)
             {
@@ -3616,8 +4256,17 @@ void generate_asm(FILE *f)
                     { fprintf(f,"    cqo\n"); emitir_carga_entero(f,"rcx",qf->arg2); fprintf(f,"    idiv rcx\n"); emitir_guardado_entero(f,qf->result,qf->op==IR_DIV?"rax":"rdx"); }
                     else
                     {
-                        const char *o = qf->op==IR_ADD?"add":qf->op==IR_SUB?"sub":"imul";
-                        fprintf(f,"    %s rax, %s\n",o,is_number(qf->arg2)?qf->arg2:mem_ref(qf->arg2));
+                        unsigned desplazamiento;
+                        if (qf->op == IR_MUL && obtener_desplazamiento_potencia_de_dos(qf->arg2, &desplazamiento))
+                        {
+                            if (desplazamiento > 0)
+                                fprintf(f, "    shl rax, %u\n", desplazamiento);
+                        }
+                        else
+                        {
+                            const char *o = qf->op==IR_ADD?"add":qf->op==IR_SUB?"sub":"imul";
+                            fprintf(f,"    %s rax, %s\n",o,is_number(qf->arg2)?qf->arg2:mem_ref(qf->arg2));
+                        }
                         emitir_guardado_entero(f,qf->result,"rax");
                     }
                 }

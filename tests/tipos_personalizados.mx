@@ -11,3 +11,47 @@ persona.edad = 25;
 persona.nombre = "Carlos Sandoval";
 Mostrar("Nombre: ", persona.nombre, "\n");
 Mostrar("Edad: ", persona.edad, "\n");
+
+Clase Entidad {
+    Protegido Entero codigo;
+
+    Publico Void asignarCodigo(Entero nuevoCodigo) {
+        este.codigo = nuevoCodigo;
+    }
+
+    Privado Entero codigoInterno() {
+        Retornar este.codigo;
+    }
+
+    Publico Virtual Entero obtenerCodigo() {
+        Retornar este.codigoInterno();
+    }
+
+    Publico Virtual Entero sumar(Entero incremento) {
+        Retornar este.codigo + incremento;
+    }
+};
+
+Clase Usuario Hereda Entidad {
+    Publico Cadena alias;
+
+    Publico Sobrescribe Entero obtenerCodigo() {
+        Retornar este.codigo + 1;
+    }
+
+    Publico Sobrescribe Entero sumar(Entero incremento) {
+        Retornar este.codigo + incremento + 1;
+    }
+};
+
+Entidad polimorfica = Nuevo(Usuario);
+polimorfica.asignarCodigo(40);
+Usuario usuario = Nuevo(Usuario);
+Usuario otroUsuario = Nuevo(Usuario);
+usuario.asignarCodigo(42);
+usuario.alias = "mx";
+otroUsuario.asignarCodigo(7);
+Mostrar("Heredado: ", usuario.obtenerCodigo(), " ", usuario.alias, "\n");
+Mostrar("Segunda instancia: ", otroUsuario.obtenerCodigo(), "\n");
+Mostrar("Polimorfismo: ", polimorfica.obtenerCodigo(), "\n");
+Mostrar("Polimorfismo con argumento: ", polimorfica.sumar(2), "\n");

@@ -1,10 +1,12 @@
 Entero bits = (6 & 3) | (1 << 4);
 bits ^= 1;
 bits <<= 1;
+Entero escalado = bits * 8;
 Booleano activo = 7;
 Booleano falso = 0;
 
 Mostrar(bits, "\n");
+Mostrar(escalado, "\n");
 Mostrar(activo, " ", falso, "\n");
 Si (activo && !falso && bits == 38) {
     Mostrar("condicion entera/booleana correcta\n");

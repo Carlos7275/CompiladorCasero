@@ -17,6 +17,7 @@ int profundidad_loop = 0;
 
 int contador_errores_semanticos = 0;
 static ASTNode *raiz_semantica = NULL;
+static const char *clase_semantica_actual = NULL;
 
 typedef struct
 {
@@ -83,6 +84,73 @@ static const FuncionNativa funciones_nativas[] = {
      {"Decimales", FLOAT, FLOAT, INT, 2, TIPO_ERROR, TIPO_ERROR}
 };
 
+typedef struct
+{
+    const char *tipo;
+    const char *metodo;
+    const char *nativa;
+    const char *modo;
+    enum TipoDato retorno;
+    int argumentos;
+    enum TipoDato tipos[4];
+} MetodoNativoOO;
+
+static const MetodoNativoOO metodos_nativos_oo[] = {
+    {"Socket", "conectar", "SocketTCPConectar", "static", INT, 2, {STRING, INT}},
+    {"Socket", "connect", "SocketTCPConectar", "static", INT, 2, {STRING, INT}},
+    {"Socket", "escuchar", "SocketTCPEscuchar", "static", INT, 2, {INT, INT}},
+    {"Socket", "listen", "SocketTCPEscuchar", "static", INT, 2, {INT, INT}},
+    {"Socket", "udp", "SocketUDP", "static", INT, 1, {INT}},
+    {"Socket", "aceptar", "SocketTCPAceptar", "receiver", INT, 0, {TIPO_ERROR}},
+    {"Socket", "accept", "SocketTCPAceptar", "receiver", INT, 0, {TIPO_ERROR}},
+    {"Socket", "enviar", "SocketEnviar", "receiver", INT, 1, {STRING}},
+    {"Socket", "send", "SocketEnviar", "receiver", INT, 1, {STRING}},
+    {"Socket", "recibir", "SocketRecibir", "receiver", STRING, 1, {INT}},
+    {"Socket", "receive", "SocketRecibir", "receiver", STRING, 1, {INT}},
+    {"Socket", "recibirLinea", "SocketRecibirLinea", "receiver", STRING, 1, {INT}},
+    {"Socket", "receiveLine", "SocketRecibirLinea", "receiver", STRING, 1, {INT}},
+    {"Socket", "enviarUDP", "SocketEnviarUDP", "receiver", INT, 3, {STRING, INT, STRING}},
+    {"Socket", "sendUDP", "SocketEnviarUDP", "receiver", INT, 3, {STRING, INT, STRING}},
+    {"Socket", "recibirUDP", "SocketRecibirUDP", "receiver", STRING, 1, {INT}},
+    {"Socket", "receiveUDP", "SocketRecibirUDP", "receiver", STRING, 1, {INT}},
+    {"Socket", "direccionRemota", "SocketDireccionRemota", "receiver", STRING, 0, {TIPO_ERROR}},
+    {"Socket", "remoteAddress", "SocketDireccionRemota", "receiver", STRING, 0, {TIPO_ERROR}},
+    {"Socket", "puertoLocal", "SocketPuertoLocal", "receiver", INT, 0, {TIPO_ERROR}},
+    {"Socket", "localPort", "SocketPuertoLocal", "receiver", INT, 0, {TIPO_ERROR}},
+    {"Socket", "timeout", "SocketTimeout", "receiver", BOOL, 2, {INT, INT}},
+    {"Socket", "cerrar", "SocketCerrar", "receiver", BOOL, 0, {TIPO_ERROR}},
+    {"Socket", "close", "SocketCerrar", "receiver", BOOL, 0, {TIPO_ERROR}},
+    {"Socket", "tlsCliente", "SocketTLSCliente", "receiver", BOOL, 1, {STRING}},
+    {"Socket", "tlsServidor", "SocketTLSServidor", "receiver", BOOL, 2, {STRING, STRING}},
+    {"HttpClient", "request", "Http", "http_request", INT, 4, {STRING, STRING, STRING, STRING}},
+    {"HttpClient", "requestTLS", "HttpTLS", "http_tls", INT, 4, {STRING, STRING, STRING, STRING}},
+    {"HttpClient", "get", "Http", "http_get", INT, 1, {STRING}},
+    {"HttpClient", "post", "Http", "http_post", INT, 2, {STRING, STRING}},
+    {"HttpClient", "put", "Http", "http_put", INT, 2, {STRING, STRING}},
+    {"HttpClient", "delete", "Http", "http_delete", INT, 1, {STRING}},
+    {"HttpClient", "body", "HttpCuerpo", "http_body", STRING, 0, {TIPO_ERROR}},
+    {"HttpClient", "cuerpo", "HttpCuerpo", "http_body", STRING, 0, {TIPO_ERROR}},
+    {"HttpClient", "headers", "HttpCabeceras", "http_headers", STRING, 0, {TIPO_ERROR}},
+    {"HttpClient", "cabeceras", "HttpCabeceras", "http_headers", STRING, 0, {TIPO_ERROR}}
+};
+
+static const MetodoNativoOO *buscar_metodo_nativo_oo(const char *tipo, const char *metodo)
+{
+    for (size_t i = 0; i < sizeof(metodos_nativos_oo) / sizeof(metodos_nativos_oo[0]); ++i)
+        if (strcmp(metodos_nativos_oo[i].tipo, tipo) == 0 &&
+            strcmp(metodos_nativos_oo[i].metodo, metodo) == 0)
+            return &metodos_nativos_oo[i];
+    return NULL;
+}
+
+static int es_tipo_nativo_oo(const char *tipo)
+{
+    for (size_t i = 0; i < sizeof(metodos_nativos_oo) / sizeof(metodos_nativos_oo[0]); ++i)
+        if (strcmp(metodos_nativos_oo[i].tipo, tipo) == 0)
+            return 1;
+    return 0;
+}
+
 static const FuncionNativa *buscar_funcion_nativa(const char *nombre, int argumentos)
 {
     for (size_t i = 0; i < sizeof(funciones_nativas) / sizeof(funciones_nativas[0]); i++)
@@ -101,6 +169,97 @@ static ASTNode *buscar_tipo(ASTNode *node, const char *nombre)
             return actual;
     }
     return NULL;
+}
+
+static int es_subtipo_de(const char *tipo, const char *base, int profundidad)
+{
+    if (!tipo || !base || profundidad > 64)
+        return 0;
+    if (strcmp(tipo, base) == 0)
+        return 1;
+    ASTNode *declaracion = buscar_tipo(raiz_semantica->hijo_izq, tipo);
+    return declaracion && declaracion->tipo_nombre
+               ? es_subtipo_de(declaracion->tipo_nombre, base, profundidad + 1)
+               : 0;
+}
+
+static int miembro_accesible(enum AccesoMiembro acceso, const char *propietario)
+{
+    if (acceso == ACCESO_PUBLICO)
+        return 1;
+    if (!clase_semantica_actual || !propietario)
+        return 0;
+    if (acceso == ACCESO_PRIVADO)
+        return strcmp(clase_semantica_actual, propietario) == 0;
+    return es_subtipo_de(clase_semantica_actual, propietario, 0);
+}
+
+static ASTNode *buscar_metodo_tipo(ASTNode *tipo, const char *nombre,
+                                  const char **propietario, int profundidad)
+{
+    if (!tipo || !nombre || profundidad > 64)
+        return NULL;
+
+    for (ASTNode *metodo = tipo->parametros; metodo; metodo = metodo->siguiente_hermano)
+        if (metodo->type == AST_FUNCION && metodo->hijo_izq &&
+            strcmp(metodo->hijo_izq->valor.nombre_id, nombre) == 0)
+        {
+            if (propietario && tipo->hijo_izq)
+                *propietario = tipo->hijo_izq->valor.nombre_id;
+            return metodo;
+        }
+
+    if (tipo->tipo_nombre)
+        return buscar_metodo_tipo(
+            buscar_tipo(raiz_semantica->hijo_izq, tipo->tipo_nombre), nombre,
+            propietario, profundidad + 1);
+    return NULL;
+}
+
+static ASTNode *buscar_campo_tipo(ASTNode *tipo, const char *nombre,
+                                 const char **propietario, int profundidad)
+{
+    if (!tipo || !nombre || profundidad > 64)
+        return NULL;
+
+    for (ASTNode *campo = tipo->hijo_der; campo; campo = campo->siguiente_hermano)
+        if (campo->type == AST_DECLARACION_VAR && campo->hijo_izq &&
+            strcmp(campo->hijo_izq->valor.nombre_id, nombre) == 0)
+        {
+            if (propietario && tipo->hijo_izq)
+                *propietario = tipo->hijo_izq->valor.nombre_id;
+            return campo;
+        }
+
+    if (tipo->tipo_nombre)
+        return buscar_campo_tipo(
+            buscar_tipo(raiz_semantica->hijo_izq, tipo->tipo_nombre), nombre,
+            propietario, profundidad + 1);
+    return NULL;
+}
+
+static void registrar_campos_tipo(ASTNode *tipo, const char *instancia, int profundidad)
+{
+    if (!tipo || !instancia || profundidad > 64)
+        return;
+
+    if (tipo->tipo_nombre)
+    {
+        ASTNode *base = buscar_tipo(raiz_semantica->hijo_izq, tipo->tipo_nombre);
+        registrar_campos_tipo(base, instancia, profundidad + 1);
+    }
+
+    for (ASTNode *campo = tipo->hijo_der; campo; campo = campo->siguiente_hermano)
+    {
+        if (campo->type != AST_DECLARACION_VAR || !campo->hijo_izq)
+            continue;
+
+        char nombre_campo[256];
+        snprintf(nombre_campo, sizeof(nombre_campo), "%s__%s",
+                 instancia, campo->hijo_izq->valor.nombre_id);
+        agregar_simbolo(ambito_actual, nombre_campo,
+                        campo->declared_type_info, campo->renglon, campo->columna);
+    }
 }
 
 /**
@@ -584,6 +743,68 @@ void visit_ast_semantic(ASTNode *node)
     case AST_DECLARACION_TIPO:
         if (node->hijo_izq && !buscar_simbolo_en_ambito_actual(ambito_actual, node->hijo_izq->valor.nombre_id))
             agregar_simbolo(ambito_actual, node->hijo_izq->valor.nombre_id, OTRO, node->renglon, node->columna);
+        if (node->tipo_nombre && !buscar_tipo(raiz_semantica->hijo_izq, node->tipo_nombre))
+            reportar_error_semantico(node->renglon, node->columna,
+                                     "Clase base no declarada: '%s'.", node->tipo_nombre);
+        for (ASTNode *member = node->hijo_der; member; member = member->siguiente_hermano)
+            if (member->es_virtual || member->es_override)
+                reportar_error_semantico(member->renglon, member->columna,
+                                         "Virtual/Sobrescribe solo se permite en metodos.");
+
+        for (ASTNode *method = node->parametros; method; method = method->siguiente_hermano)
+        {
+            ASTNode *base_type = node->tipo_nombre
+                                     ? buscar_tipo(raiz_semantica->hijo_izq, node->tipo_nombre)
+                                     : NULL;
+            const char *base_owner = NULL;
+            ASTNode *base_method = base_type && method->hijo_izq
+                                       ? buscar_metodo_tipo(base_type,
+                                                           method->hijo_izq->valor.nombre_id,
+                                                           &base_owner, 0)
+                                       : NULL;
+            if (method->es_override && (!base_method || !base_method->es_virtual))
+                reportar_error_semantico(method->renglon, method->columna,
+                                         "Sobrescribe requiere un metodo Virtual heredado.");
+            if (base_method && base_method->es_virtual && !method->es_override)
+                reportar_error_semantico(method->renglon, method->columna,
+                                         "El metodo que sobrescribe uno Virtual debe marcarse Sobrescribe.");
+            if (method->es_override && base_method)
+            {
+                ASTNode *base_parameter = base_method->parametros;
+                ASTNode *parameter = method->parametros;
+                int signature_matches = method->return_type == base_method->return_type;
+                while (base_parameter && parameter)
+                {
+                    if (base_parameter->declared_type_info != parameter->declared_type_info)
+                        signature_matches = 0;
+                    base_parameter = base_parameter->siguiente_hermano;
+                    parameter = parameter->siguiente_hermano;
+                }
+                if (base_parameter || parameter)
+                    signature_matches = 0;
+                if (!signature_matches)
+                    reportar_error_semantico(method->renglon, method->columna,
+                                             "Sobrescribe debe conservar la firma del metodo virtual.");
+            }
+            if (method->es_override)
+                method->es_virtual = 1;
+
+            const char *previous_class = clase_semantica_actual;
+            clase_semantica_actual = node->hijo_izq
+                                         ? node->hijo_izq->valor.nombre_id
+                                         : NULL;
+            TablaSimbolos *method_scope = crear_tabla_simbolos(ambito_actual);
+            ambito_actual = method_scope;
+            EntradaSimbolo *receiver = agregar_simbolo(ambito_actual, "este", OTRO,
+                                                       method->renglon, method->columna);
+            if (receiver && node->hijo_izq)
+                receiver->tipo_nombre = strdup(node->hijo_izq->valor.nombre_id);
+            if (node->hijo_izq)
+                registrar_campos_tipo(node, "este", 0);
+            visit_ast_semantic(method);
+            ambito_actual = method_scope->padre;
+            clase_semantica_actual = previous_class;
+        }
         break;
     case AST_FUNCION:
         if (node->hijo_izq) agregar_simbolo(ambito_actual, node->hijo_izq->valor.nombre_id,
@@ -594,6 +815,94 @@ void visit_ast_semantic(ASTNode *node)
         visit_ast_semantic(node->hijo_der);
         break;
     case AST_LLAMADA:
+        if (node->tipo_nombre)
+        {
+            EntradaSimbolo *receiver = buscar_simbolo(ambito_actual, node->tipo_nombre);
+            const char *receiver_type = receiver ? receiver->tipo_nombre : node->tipo_nombre;
+            int static_receiver = !receiver && es_tipo_nativo_oo(receiver_type);
+            if (receiver && node->parametros)
+                visit_ast_semantic(node->parametros);
+            if (node->hijo_der)
+                for (ASTNode *argument = node->hijo_der; argument; argument = argument->siguiente_hermano)
+                    visit_ast_semantic(argument);
+
+            const MetodoNativoOO *native_method =
+                (receiver_type && (receiver || static_receiver) && node->hijo_izq)
+                    ? buscar_metodo_nativo_oo(receiver_type, node->hijo_izq->valor.nombre_id)
+                    : NULL;
+            if (native_method)
+            {
+                int count = 0;
+                for (ASTNode *argument = node->hijo_der; argument; argument = argument->siguiente_hermano)
+                    ++count;
+                if (count != native_method->argumentos ||
+                    (strcmp(native_method->modo, "static") == 0 && receiver) ||
+                    (strcmp(native_method->modo, "receiver") == 0 && !receiver))
+                {
+                    reportar_error_semantico(node->renglon, node->columna,
+                                             "Uso invalido del metodo '%s' para '%s'.",
+                                             node->hijo_izq->valor.nombre_id, receiver_type);
+                    node->resolved_type = TIPO_ERROR;
+                    break;
+                }
+
+                ASTNode *argument = node->hijo_der;
+                for (int i = 0; i < native_method->argumentos && argument; ++i, argument = argument->siguiente_hermano)
+                    verificar_asignacion(argument->renglon, argument->columna,
+                                         native_method->tipos[i], argument->resolved_type);
+
+                size_t marker_length = strlen(native_method->modo) + strlen(native_method->nativa) + 16;
+                node->ir_result_name = malloc(marker_length);
+                if (node->ir_result_name)
+                    snprintf(node->ir_result_name, marker_length, "__mxmethod__%s__%s",
+                             native_method->modo, native_method->nativa);
+                node->resolved_type = native_method->retorno;
+                break;
+            }
+
+            ASTNode *type = receiver && receiver_type
+                                ? buscar_tipo(raiz_semantica->hijo_izq, receiver_type)
+                                : NULL;
+            const char *method_owner = NULL;
+            ASTNode *method = type && node->hijo_izq
+                                  ? buscar_metodo_tipo(type, node->hijo_izq->valor.nombre_id,
+                                                       &method_owner, 0)
+                                  : NULL;
+            if (!receiver || !type || !method)
+            {
+                reportar_error_semantico(node->renglon, node->columna,
+                                         "Metodo no encontrado para el objeto '%s'.",
+                                         node->tipo_nombre);
+                node->resolved_type = TIPO_ERROR;
+                break;
+            }
+            if (!node->receptor_nombre)
+                node->receptor_nombre = strdup(node->tipo_nombre);
+            free(node->tipo_nombre);
+            node->tipo_nombre = strdup(receiver_type);
+            if (!miembro_accesible(method->acceso_miembro, method_owner))
+                reportar_error_semantico(node->renglon, node->columna,
+                                         "El metodo '%s' no es accesible desde esta clase.",
+                                         node->hijo_izq->valor.nombre_id);
+
+            node->ir_result_name = strdup(receiver->tipo_nombre);
+            ASTNode *formal = method->parametros;
+            ASTNode *argument = node->hijo_der;
+            while (formal && argument)
+            {
+                verificar_asignacion(argument->renglon, argument->columna,
+                                     formal->declared_type_info,
+                                     argument->resolved_type);
+                formal = formal->siguiente_hermano;
+                argument = argument->siguiente_hermano;
+            }
+            if (formal || argument)
+                reportar_error_semantico(node->renglon, node->columna,
+                                         "Numero incorrecto de argumentos para el metodo '%s'.",
+                                         node->hijo_izq->valor.nombre_id);
+            node->resolved_type = method->return_type;
+            break;
+        }
         if (node->hijo_der) for (ASTNode *a=node->hijo_der; a; a=a->siguiente_hermano) visit_ast_semantic(a);
         if (node->hijo_izq) {
             EntradaSimbolo *f = buscar_simbolo(ambito_actual, node->hijo_izq->valor.nombre_id);
@@ -670,26 +979,21 @@ void visit_ast_semantic(ASTNode *node)
     {
         const char *nombre_var = node->hijo_izq->valor.nombre_id;
         enum TipoDato tipo_declarado = node->declared_type_info;
+        if (node->tipo_nombre && strcmp(node->tipo_nombre, "Socket") == 0)
+            tipo_declarado = INT;
 
         EntradaSimbolo *simbolo_agregado = agregar_simbolo(ambito_actual, nombre_var, tipo_declarado, node->renglon, node->columna);
         if (simbolo_agregado != NULL)
         {
             simbolo_agregado->es_constante = 0;
+            if (node->tipo_nombre)
+                simbolo_agregado->tipo_nombre = strdup(node->tipo_nombre);
         }
         if (node->tipo_nombre != NULL)
         {
             ASTNode *tipo = buscar_tipo(raiz_semantica->hijo_izq, node->tipo_nombre);
             if (tipo != NULL)
-            {
-                for (ASTNode *campo = tipo->hijo_der; campo; campo = campo->siguiente_hermano)
-                {
-                    char nombre_campo[256];
-                    snprintf(nombre_campo, sizeof(nombre_campo), "%s__%s",
-                             node->hijo_izq->valor.nombre_id, campo->hijo_izq->valor.nombre_id);
-                    agregar_simbolo(ambito_actual, nombre_campo,
-                                    campo->declared_type_info, campo->renglon, campo->columna);
-                }
-            }
+                registrar_campos_tipo(tipo, nombre_var, 0);
         }
 
         if (node->hijo_der != NULL)
@@ -1147,6 +1451,35 @@ void visit_ast_semantic(ASTNode *node)
 
     case AST_IDENTIFICADOR:
     {
+        if (node->tipo_nombre && node->ir_result_name)
+        {
+            const char *receiver_name = node->receptor_nombre
+                                            ? node->receptor_nombre
+                                            : node->tipo_nombre;
+            EntradaSimbolo *receiver = buscar_simbolo(ambito_actual, receiver_name);
+            ASTNode *type = receiver && receiver->tipo_nombre
+                                ? buscar_tipo(raiz_semantica->hijo_izq, receiver->tipo_nombre)
+                                : NULL;
+            const char *field_owner = NULL;
+            ASTNode *field = type ? buscar_campo_tipo(type, node->ir_result_name,
+                                                      &field_owner, 0)
+                                  : NULL;
+            if (type && !type->es_clase)
+            {
+                free(node->receptor_nombre);
+                node->receptor_nombre = NULL;
+            }
+            if (field && !miembro_accesible(field->acceso_miembro, field_owner))
+                reportar_error_semantico(node->renglon, node->columna,
+                                         "El campo '%s' no es accesible desde esta clase.",
+                                         node->ir_result_name);
+            if (receiver && receiver->tipo_nombre)
+            {
+                free(node->tipo_nombre);
+                node->tipo_nombre = strdup(receiver->tipo_nombre);
+            }
+        }
+
         EntradaSimbolo *entrada = buscar_simbolo(ambito_actual, node->valor.nombre_id);
         if (entrada == NULL)
         {
@@ -1157,6 +1490,8 @@ void visit_ast_semantic(ASTNode *node)
         else
         {
             node->resolved_type = entrada->tipo;
+            if (!node->tipo_nombre && entrada->tipo_nombre)
+                node->tipo_nombre = strdup(entrada->tipo_nombre);
         }
         break;
     }
@@ -1176,6 +1511,22 @@ void visit_ast_semantic(ASTNode *node)
         node->resolved_type = BOOL;
         node->tipoconstante = CONSTANTE_LITERAL;
         break;
+    case AST_NUEVO:
+    {
+        ASTNode *type = buscar_tipo(raiz_semantica->hijo_izq, node->tipo_nombre);
+        if (!type || !type->es_clase)
+        {
+            reportar_error_semantico(node->renglon, node->columna,
+                                     "Nuevo requiere una clase declarada: '%s'.",
+                                     node->tipo_nombre ? node->tipo_nombre : "?");
+            node->resolved_type = TIPO_ERROR;
+        }
+        else
+        {
+            node->resolved_type = OTRO;
+        }
+        break;
+    }
 
     case AST_ROMPER_STMT:
         if (profundidad_loop <= 0)

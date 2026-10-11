@@ -86,6 +86,7 @@ void destruir_jerarquia_tablas_simbolos(TablaSimbolos *tabla) {
             EntradaSimbolo *temp = actual;
             actual = actual->siguiente_en_cubeta;
             free(temp->nombre);
+            free(temp->tipo_nombre);
             if (temp->es_constante && temp->tipo == STRING && temp->valor_constante.valor_cadena != NULL) {
                 free(temp->valor_constante.valor_cadena);
             }
@@ -126,6 +127,7 @@ EntradaSimbolo *agregar_simbolo(TablaSimbolos *tabla, const char *nombre, enum T
     }
 
     nueva_entrada->nombre = strdup(nombre);
+    nueva_entrada->tipo_nombre = NULL;
     nueva_entrada->tipo = tipo;
     nueva_entrada->es_constante = 0;
     nueva_entrada->valor_constante.valor_int = 0;

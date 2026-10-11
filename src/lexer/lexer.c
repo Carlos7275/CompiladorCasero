@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante", "Void", "void", "Retornar", "Importar", "Intentar", "Capturar", "Lanzar"};
+const char palabReserv[][100] = {"Leer", "Mostrar", "Mientras", "Continuar", "Romper", "Para", "Si", "Sino", "Encambio", "Cadena", "Entero", "Flotante", "Caracter", "Booleano", "Paso", "Verdadero", "Falso", "Constante", "Void", "void", "Retornar", "Importar", "Intentar", "Capturar", "Lanzar", "Clase", "Hereda", "Publico", "Protegido", "Privado", "Virtual", "Sobrescribe", "Nuevo"};
 
 /**
  * Reconoce un identificador o palabra reservada.

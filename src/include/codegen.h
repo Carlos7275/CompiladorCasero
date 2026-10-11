@@ -37,6 +37,10 @@ typedef enum
 
     IR_LOAD_ARRAY,
     IR_STORE_ARRAY,
+    IR_ALLOC_OBJECT,
+    IR_LOAD_FIELD,
+    IR_STORE_FIELD,
+    IR_IF_OBJECT_TYPE_GOTO,
 
     IR_PRINT,
     IR_READ,

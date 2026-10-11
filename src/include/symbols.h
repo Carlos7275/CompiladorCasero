@@ -9,6 +9,7 @@
 typedef struct EntradaSimbolo
 {
     char *nombre;
+    char *tipo_nombre;
     enum TipoDato tipo;
     int es_constante;
     union

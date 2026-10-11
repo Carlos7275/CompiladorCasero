@@ -69,7 +69,8 @@ enum ASTNodeType
     AST_IMPORT,
 
     AST_ACCESO_ARRAY,
-    AST_TERNARIO_EXPR
+    AST_TERNARIO_EXPR,
+    AST_NUEVO
 };
 
 enum ASTConstant
@@ -77,6 +78,13 @@ enum ASTConstant
     NO_CONSTANTE = 0,
     CONSTANTE_LITERAL = 1,
     CONSTANTE_SIMBOLICA = 2
+};
+
+enum AccesoMiembro
+{
+    ACCESO_PUBLICO,
+    ACCESO_PROTEGIDO,
+    ACCESO_PRIVADO
 };
 
 typedef struct ASTNode
@@ -113,6 +121,11 @@ typedef struct ASTNode
     enum TipoDato return_type;
 
     char *tipo_nombre;
+    enum AccesoMiembro acceso_miembro;
+    int es_virtual;
+    int es_override;
+    int es_clase;
+    char *receptor_nombre;
 
 } ASTNode;
 
